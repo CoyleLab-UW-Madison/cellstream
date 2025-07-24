@@ -1,7 +1,0 @@
-numpy
-pandas
-matplotlib
-tifffile
-nd2
-progressbar2
-ssqueezepy
