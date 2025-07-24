@@ -23,6 +23,7 @@ Once dependencies are configured, install the package with:
 
 ```bash
 pip install cellstream
+```
 
 ## Example Usage
 
