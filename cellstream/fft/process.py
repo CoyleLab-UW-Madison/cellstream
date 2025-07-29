@@ -56,7 +56,7 @@ def create_dataframe(
                 df_data[colname] = tensor[ch_idx].detach().cpu().numpy()
 
     for mask_name, result in results.items():
-        suffix = "" if mask_name == "all" else f"_{mask_name}"
+        suffix = "" if mask_name == "all" else f"___{mask_name}"
         add_to_df(result, suffix=suffix)
 
     return pd.DataFrame(df_data)
@@ -91,8 +91,7 @@ def process_image_cellstreams(
     cutoff_frequency_bin=0, 
     carrier_index=0, 
     channel_names=None, 
-    cutoff_power=None, 
-    cutoff_phases=None, 
+    threshold_cutoffs=None,
     return_fft_features=False,
     image_filename=None,
     masks_filename=None,
@@ -127,10 +126,21 @@ def process_image_cellstreams(
     else:
         masks_dict = {'all': masks.clone()}
     
-    if cutoff_power is not None:
-        carrier_amp = queried_fft_features['queried_norm_amplitudes'][carrier_index]
-        masks_th = (carrier_amp > cutoff_power).int() * masks.clone()
-        masks_dict['thresholded'] = masks_th.to(dtype=torch.int64)
+    if threshold_cutoffs is not None:
+        for feature_name, threshold in threshold_cutoffs.items():
+            queried_feature_key=f"queried_{feature_name}"
+            if queried_feature_key in queried_fft_features.keys():
+                feature_vals = queried_fft_features[queried_feature_key][carrier_index]
+                mask = (feature_vals > threshold).int() * masks.clone()
+                masks_dict[f"thresh_{queried_feature_key}_at_{threshold}"] = mask.to(dtype=torch.int64)
+            else:
+                print(f"[warn] Feature '{queried_feature_key}' not found in queried_fft_features. Skipping threshold.")
+
+    
+    # if cutoff_power is not None:
+    #     carrier_amp = queried_fft_features['queried_norm_amplitudes'][carrier_index]
+    #     masks_th = (carrier_amp > cutoff_power).int() * masks.clone()
+    #     masks_dict['thresholded'] = masks_th.to(dtype=torch.int64)
     
     print("Extracting single-cell data...")
     results = extract_single_cell_data(
