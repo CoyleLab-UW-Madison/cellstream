@@ -23,7 +23,7 @@ data=cellstream.fft.process_folder_cellstreams(
     channel_names=['minE', 'minD'],
     cutoff_frequency_bin=6,
     peak_method='normalized_amplitude',
-    fft_features_to_process=['z_score','normalized_amplitude']
+    fft_features_to_process=['z_score','normalized_amplitude','phase']
     
     #downsample_by=0.25
 )
