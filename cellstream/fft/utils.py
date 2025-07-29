@@ -33,7 +33,7 @@ def generate_fft_features(
    feature_map = {}
 
    def allocate(shape):
-       return torch.empty(shape, device=device if batch_size else None)
+       return torch.empty(shape if batch_size else None)
    
 
    if batch_size is not None:
