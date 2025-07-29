@@ -22,8 +22,10 @@ This package requires PyTorch and `torch-scatter` for full functionality. These 
 Once dependencies are configured, install the package with:
 
 ```bash
-pip install cellstream
+pip install git+https://github.com/CoyleLab-UW-Madison/cellstream
 ```
+
+Note this package is still in early stages of development.
 
 ## Example Usage
 
