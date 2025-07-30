@@ -2,7 +2,7 @@
 name = "cellstream"
 version = "0.1.0"
 description = "Microscopy and single-cell signal processing analysis tools"
-authors = [{ name = "Your Organization" }]
+authors = [{ name = "Coyle Lab @ UW-Madison" }]
 readme = "README.md"
 requires-python = ">=3.8"
 

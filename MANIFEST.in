@@ -1,0 +1,9 @@
+# Include only what you want
+include README.md
+recursive-include cellstream *.py
+
+# Optional: include only small sample/example files
+# recursive-include examples *.py
+
+# Or, exclude examples entirely:
+prune examples
