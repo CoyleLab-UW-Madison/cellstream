@@ -1,9 +1,25 @@
-# -*- coding: utf-8 -*-
 """
-Created on Sat Jul 19 14:21:17 2025
+cellstream.image.utils
 
-@author: smcoyle
+Low-level utilities for image and mask processing.
+@authors: smcoyle,cxwong
+
+Functions:
+- downsample(tensor, scale, is_mask=False): Resize an image or mask tensor by a scale factor.
+    Uses average pooling for image data and nearest neighbor for masks to preserve label integrity.
+
+- normalize_histogram(image): Normalize a 5D image tensor (C, T, H, W) per-frame to zero mean and unit variance.
+    Flattens each spatial frame (across C, T) and normalizes individually.
+
+- convolve_along_timeseries(video_tensor, kernel_weights, batch_size=512): 
+    Convolve a 1D kernel along the time axis of a video tensor (C,T,H,W) using grouped Conv1d.
+    Efficient batched implementation that supports GPU and large inputs.
+
+- color_by_axis(img, cmap='turbo', proj='max'):
+    Color-codes a (T,C, H, W) timeseries stack along the time axis using a specified colormap.
+    Supports max or sum projection for visualizing time-resolved activity in false color.
 """
+
 
 import torch
 import progressbar
@@ -15,18 +31,6 @@ def downsample(
         is_mask=False
     ):
     
-    """
-    Downsamples an image or mask to the same target size, using appropriate method.
-
-    Args:
-        tensor (torch.Tensor): Shape (H, W), (C, H, W), or (B, C, H, W).
-        scale (float or tuple): Scale factor (<1.0 for downsampling).
-        is_mask (bool): If True, use nearest interpolation for masks.
-                        If False, use adaptive average pooling for images.
-
-    Returns:
-        torch.Tensor: Downsampled tensor, with same target size for all inputs.
-    """
     
     original_dim = tensor.dim()
     dtype = tensor.dtype
@@ -65,6 +69,7 @@ def downsample(
         return out
 
 def normalize_histogram(image):
+    
     #correct for intensity changes over time
     T,C,X,Y=image.shape
     image=image.reshape(T,C,X*Y)

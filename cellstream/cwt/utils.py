@@ -11,7 +11,7 @@ import os
 import numpy as np
 import warnings
 
-#from torch_scatter import scatter_mean, scatter_std
+from torch_scatter import scatter_mean, scatter_std
 
 from ..image.utils import downsample
 from ..image.utils import normalize_histogram as norm_hist
@@ -247,3 +247,31 @@ def generate_cwt_image_cellstreams(
     else:
         return final
 
+def extract_cwt_cellstreams(features,track_masks):
+    
+    '''extract single-cell trajectories using label_image tracks'''
+    
+    ##reshape features
+    if features.dim()==3:
+        print("3 channel image detected; unsqueezing C dimension...")
+        features=features.unsqueeze(1)
+    T,C,X,Y=features.shape
+    features=features.reshape(T,C,-1)
+    
+    ##reshape masks
+    if track_masks.dim()==2: #static 2D mask
+        track_masks=track_masks.broadcast_to(T,C,X,Y)
+    elif track_masks.dim()==3:
+         #timeseries mask (T,X,Y)
+        track_masks=track_masks.broadcast_to(C,T,X,Y)
+        track_masks=track_masks.permute(1,0,2,3) # (T,C,X)
+    track_masks=track_masks.reshape(T,C,-1)
+    
+    num_masks=int(track_masks.max().item()) + 1
+    
+    cellstreams_mean=scatter_mean(features,track_masks,dim=-1,dim_size=num_masks) #T,C,num_masks
+    cellstreams_mean=cellstreams_mean.permute(2,1,0)
+    
+    cellstreams_std=scatter_std(features,track_masks,dim=-1,dim_size=num_masks)
+    cellstreams_std=cellstreams_std.permute(2,1,0)
+    return cellstreams_mean,cellstreams_std

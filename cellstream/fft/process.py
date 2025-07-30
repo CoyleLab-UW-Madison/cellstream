@@ -1,16 +1,43 @@
 # -*- coding: utf-8 -*-
 """
+High-Level FFT-Based Image Processing Pipeline
+
 Created on Sat Jul 19 14:52:43 2025
+@authors: smcoyle, cxwong
 
-@author: smcoyle
+This module defines the high-level interface for processing time-resolved
+microscopy images into per-cell frequency-domain feature summaries using the FFT.
+
+Pipeline Overview:
+------------------
+1. `process_image_cellstreams`:
+    Main entry point for analyzing a single image and its segmentation masks.
+    Performs FFT extraction, frequency peak querying, mask thresholding,
+    and single-cell aggregation.
+
+2. `create_dataframe`:
+    Converts aggregated feature statistics into a structured `pandas.DataFrame`
+    for export or modeling.
+
+3. `reshape_to_longform`:
+    Transforms wide-form DataFrame into tidy/long-form format for plotting or
+    statistical analysis.
+
+4. `process_folder_cellstreams`:
+    Batch-processes all compatible image/mask pairs in a directory.
+
+Dependencies:
+-------------
+- Assumes FFT utilities are in `fft.utils`.
+- Assumes image IO tools (e.g., `load_image`, `downsample`) are available via `image.loaders` and `image.utils`.
 """
-
 
 import torch
 import pandas as pd
 import os
 import progressbar
-
+import re
+    
 from .utils import generate_fft_features
 from .utils import query_fft_features
 from .utils import extract_single_cell_data
@@ -25,9 +52,25 @@ def create_dataframe(
     masks_filename=None
 ):
     """
-    Create pandas DataFrame from results dict.
-    Will add '_th' or other suffixes based on mask names.
+    Convert the dictionary of per-cell results into a structured DataFrame.
+
+    Parameters:
+    -----------
+    results : dict
+        Dictionary mapping mask names to dicts of per-cell channel-level features.
+    channel_names : list of str, optional
+        Channel names to label columns; otherwise defaults to "Channel i".
+    image_filename : str, optional
+        Name of the original image file (for tracking).
+    masks_filename : str, optional
+        Name of the corresponding mask file.
+
+    Returns:
+    --------
+    df : pandas.DataFrame
+        Wide-form table with per-cell stats (mean, sd) for each channel and feature.
     """
+    
     # Pick one entry to get number of masks
     first_key = next(iter(results))
     num_cells = results[first_key][next(iter(results[first_key]))].shape[1]
@@ -62,11 +105,22 @@ def create_dataframe(
     return pd.DataFrame(df_data)
 
 def reshape_to_longform(df):
+    
     """
-    Reshape the wide-form dataframe into tidy/long-form format.
-    Assumes feature columns follow pattern: <channel>_<feature>_<stat>[_<mask_type>]
+    Reshape wide-form FFT feature DataFrame to tidy/long-form.
+
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        Wide-form output from `create_dataframe`.
+
+    Returns:
+    --------
+    long_df : pandas.DataFrame
+        Long-form DataFrame with columns:
+        ['mask_index', 'image_filename', 'mask_filename',
+         'channel', 'feature', 'stat', 'mask_type', 'value']
     """
-    import re
 
     id_vars = ["mask_index", "image_filename", "mask_filename"]
     value_vars = [col for col in df.columns if col not in id_vars]
@@ -98,9 +152,51 @@ def process_image_cellstreams(
     downsample_by=None,
     **kwargs
 ):
+    
     """
-    Main processing function for per-cell features.
+    Full FFT-based processing pipeline for a single image and mask set.
+
+    Steps:
+    - Optional downsampling
+    - FFT feature extraction
+    - Peak frequency querying
+    - Thresholding to create additional masks
+    - Per-cell feature extraction
+    - DataFrame generation
+
+    Parameters:
+    -----------
+    image : torch.Tensor
+        Time-resolved input image, shape (T, C, X, Y).
+    masks : torch.Tensor or dict
+        Either a single mask (X, Y) or a dictionary of masks.
+    cutoff_frequency_bin : int
+        Ignore frequencies below this bin when locating peaks.
+    carrier_index : int
+        Reference channel for phase comparisons and peak sharing.
+    channel_names : list of str
+        Optional names for the image channels.
+    threshold_cutoffs : dict, optional
+        Mapping of {feature_name: threshold_value} to generate new thresholded masks.
+    return_fft_features : bool
+        Whether to return the raw FFT feature tensors as well.
+    image_filename : str, optional
+        Name of source image file (for record keeping).
+    masks_filename : str, optional
+        Name of masks file.
+    downsample_by : float or None
+        If set, spatially downsample image and masks by this factor.
+    kwargs : dict
+        Additional arguments passed to `generate_fft_features` and `query_fft_features`.
+
+    Returns:
+    --------
+    df : pandas.DataFrame
+        Table of per-cell FFT-derived features.
+    fft_features : dict (optional)
+        Raw FFT features dictionary (if `return_fft_features=True`).
     """
+    
     T, C, X, Y = image.shape
     
     if channel_names is None:
@@ -159,6 +255,25 @@ def process_folder_cellstreams(
         **kwargs
     ):
 
+    """
+    Batch process all images and masks in a folder using FFT feature extraction.
+
+    Parameters:
+    -----------
+    images_directory : str
+        Path to directory containing input image files (.tif, .nd2).
+    masks_directory : str
+        Path to directory containing corresponding mask files.
+
+    kwargs : dict
+        Passed to `process_image_cellstreams`.
+
+    Returns:
+    --------
+    all_data : pandas.DataFrame
+        Combined DataFrame of all per-cell results from the folder.
+    """
+    
     images = os.listdir(images_directory)
     
     # Process the positive images
