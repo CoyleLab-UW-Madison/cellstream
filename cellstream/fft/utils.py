@@ -3,7 +3,7 @@
 cellstream.fft.utils
 FFT Feature Extraction and Analysis Module
 
-@authors: smcoyle,cxwong
+@authors: coylelab
 
 This module provides tools to extract per-pixel frequency-domain features from
 time-resolved microscopy data using FFT, and to map these features to single-cell
