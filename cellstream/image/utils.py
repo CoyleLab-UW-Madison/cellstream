@@ -99,7 +99,7 @@ def convolve_along_timeseries(video_tensor, kernel_weights, batch_size=512):
     output = torch.cat(output_chunks, dim=0)
     return output.reshape(C, H, W, T).permute(3, 0, 1, 2)
 
-def color_by_axis(img: torch.Tensor, cmap='turbo', proj='max'):
+def color_by_axis(img: torch.Tensor, cmap='turbo', proj='max', minmax_norm=True):
     """
     Apply a colormap along time (T) for each channel in (T, C, X, Y),
     returning (C, X, Y, 3) RGB images.
@@ -108,11 +108,17 @@ def color_by_axis(img: torch.Tensor, cmap='turbo', proj='max'):
         img: (T, C, X, Y) tensor
         cmap: matplotlib colormap name
         proj: 'max' or 'sum'
+        minmax_norm: True -> performs minmax normalization before coloring
 
     Returns:
         (C, X, Y, 3) tensor of RGB images
     """
     T, C, X, Y = img.shape
+    
+    if minmax_norm==True:
+        img_min=torch.min(img)
+        img_max=torch.max(img)
+        img=(img-img_min)/(img_max-img_min)
 
     # (T, 3) colormap, normalized to [0,1]
     colors = torch.tensor(plt.get_cmap(cmap).resampled(T)(range(T)), dtype=img.dtype)[:, :3]  # (T, 3)

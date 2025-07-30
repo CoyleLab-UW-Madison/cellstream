@@ -23,7 +23,7 @@ def query_cwt_block(
         num_filter_banks=1, 
         normalize_amplitudes=False, 
         carrier_channel=0, 
-        channel_outputs={0: ('amp', 'freq', 'phase')},
+        channel_outputs={0: ['amp', 'freq', 'phase']},
         use_gpu=False,
         bank_method='max_pool',
         sampling=None,
@@ -50,9 +50,11 @@ def query_cwt_block(
     #Prepare shapes
     BATCH_SIZE, C, T=data.shape
     
+    #prepare channel-specific containers
     split_channels={}
-    if normalize_amplitudes==True:
-        split_channels_full_power_sums={}
+    split_channels_full_power_sums={}
+    split_channels_full_means={}
+    split_channels_full_std={}
         
     for channel in channel_outputs:    
     # Compute CWT with forwarded parameters
@@ -61,6 +63,9 @@ def query_cwt_block(
             Twx = torch.tensor(Twx)
         if normalize_amplitudes==True:
             split_channels_full_power_sums[channel]=Twx.abs().sum(axis=1,keepdims=True)
+        if 'z_score' in channel_outputs[channel]:
+            split_channels_full_means[channel]=Twx.abs().mean(axis=1,keepdims=True)
+            split_channels_full_std[channel]=Twx.abs().std(axis=1,keepdims=True)
         Twx_sub = Twx[:,min_scale:max_scale,:].clone()
         split_channels[channel]=Twx_sub
 
@@ -129,6 +134,13 @@ def query_cwt_block(
         if 'amp' in returns:
             ch_p=torch.gather(P,1,carrier_freq)  # Gather relevant phases
             results[channel]['amp'] = ch_p[:,:num_filter_banks,:].cpu()
+        if 'z_score' in returns:
+            if 'amp' in returns:
+                z=(ch_p-split_channels_full_means[channel])/split_channels_full_std[channel]
+            else:
+                ch_p=torch.gather(P,1,carrier_freq)
+                z=(ch_p-split_channels_full_means[channel])/split_channels_full_std[channel]
+            results[channel]['z_score'] = z[:,:num_filter_banks,:].cpu()
         if 'freq' in returns:
             if sampling is not None:
                 results[channel]['freq'] = carrier_freq_converted[:,:num_filter_banks,:].cpu() #replace with proper conversion soon
