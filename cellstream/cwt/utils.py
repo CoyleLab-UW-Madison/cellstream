@@ -1,8 +1,24 @@
-# -*- coding: utf-8 -*-
 """
-Created on Sat Jul 19 14:52:43 2025
+cellstream.cwt.utils
 
-@author: smcoyle
+Low-level utilities for cwt image processing.
+@authors: coylelab
+
+Functions:
+- query_cwt_block: block processor that generates cwts and queries data lines with a carrier signals. 
+        When bank_method='max_pool':
+            Adaptive max pooling maps the range of selected scales (min_scale, max_scale) to num_filter_banks.
+            Within each bank, we store amplitude (maxes) and scale (indices) for the local maximum in the carrier channel.
+            Data lines are queried (phase, amp, ...) at these locations and used to generate the associted stream tensor.
+        When bank_method='sort' 
+            Carrier amplitudes are sorted to locate the num_filter_banks peaks.
+            Data lines are queried at these locations to generate the associated stream tensor as above.
+        For num_banks=1 these methods perform the same and use the dominant carrier signal to query the other lines.
+
+- generate_cwt_image_cellstreams: performs the above processing through blocked processing of the entire image
+
+- extract_cwt_cellstreams: fast extraction of cwt_features timeseries using label image tracks.
+
 """
 
 import torch

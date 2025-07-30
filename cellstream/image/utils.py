@@ -2,13 +2,15 @@
 cellstream.image.utils
 
 Low-level utilities for image and mask processing.
-@authors: smcoyle,cxwong
+@authors: coylelab
 
 Functions:
-- downsample(tensor, scale, is_mask=False): Resize an image or mask tensor by a scale factor.
+- downsample(tensor, scale, is_mask=False): 
+    Resize an image or mask tensor by a scale factor.
     Uses average pooling for image data and nearest neighbor for masks to preserve label integrity.
 
-- normalize_histogram(image): Normalize a 5D image tensor (C, T, H, W) per-frame to zero mean and unit variance.
+- normalize_histogram(image): 
+    Normalize a 4D image tensor (C, T, H, W) per-frame to zero mean and unit variance.
     Flattens each spatial frame (across C, T) and normalizes individually.
 
 - convolve_along_timeseries(video_tensor, kernel_weights, batch_size=512): 
@@ -100,6 +102,7 @@ def convolve_along_timeseries(video_tensor, kernel_weights, batch_size=512):
     return output.reshape(C, H, W, T).permute(3, 0, 1, 2)
 
 def color_by_axis(img: torch.Tensor, cmap='turbo', proj='max', minmax_norm=True):
+    
     """
     Apply a colormap along time (T) for each channel in (T, C, X, Y),
     returning (C, X, Y, 3) RGB images.

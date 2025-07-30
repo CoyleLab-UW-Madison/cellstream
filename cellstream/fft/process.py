@@ -1,35 +1,31 @@
 # -*- coding: utf-8 -*-
 """
-High-Level FFT-Based Image Processing Pipeline
+cellstream.fft.process
 
-Created on Sat Jul 19 14:52:43 2025
-@authors: smcoyle, cxwong
+High-Level FFT-Based Image Processing Pipelines
+
+@authors: coylelab
 
 This module defines the high-level interface for processing time-resolved
 microscopy images into per-cell frequency-domain feature summaries using the FFT.
 
-Pipeline Overview:
-------------------
-1. `process_image_cellstreams`:
+Functions:
+- process_image_cellstreams:
     Main entry point for analyzing a single image and its segmentation masks.
     Performs FFT extraction, frequency peak querying, mask thresholding,
     and single-cell aggregation.
 
-2. `create_dataframe`:
+- create_dataframe:
     Converts aggregated feature statistics into a structured `pandas.DataFrame`
     for export or modeling.
 
-3. `reshape_to_longform`:
+- reshape_to_longform`:
     Transforms wide-form DataFrame into tidy/long-form format for plotting or
     statistical analysis.
 
-4. `process_folder_cellstreams`:
+- process_folder_cellstreams`:
     Batch-processes all compatible image/mask pairs in a directory.
 
-Dependencies:
--------------
-- Assumes FFT utilities are in `fft.utils`.
-- Assumes image IO tools (e.g., `load_image`, `downsample`) are available via `image.loaders` and `image.utils`.
 """
 
 import torch
