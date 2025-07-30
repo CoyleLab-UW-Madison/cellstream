@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-Created on Thu Jul 17 15:04:37 2025
+cellstream.image.loaders
 
-@author: smcoyle
+Handles loading of images into tensors.
+
+@author: coylelab
 """
 
 import nd2
