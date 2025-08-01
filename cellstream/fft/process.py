@@ -238,7 +238,8 @@ def process_image_cellstreams(
     results = extract_single_cell_data(
         masks_dict, queried_fft_features, mean_image
     )
-
+    
+    print("making dataframe...")
     df = create_dataframe(
         results, channel_names, image_filename, masks_filename
     )

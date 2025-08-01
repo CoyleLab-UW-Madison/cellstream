@@ -273,9 +273,9 @@ def extract_single_cell_data(
         return stats
     
     results = {}
+    num_labels = max(int(mask.max().item()) for mask in masks_dict.values()) + 1
     for name, mask in masks_dict.items():
         mask_flat = mask.reshape(X * Y)
-        num_labels = int(mask_flat.max().item()) + 1
         results[name] = compute_stats(mask_flat, num_labels)
     
     return results
