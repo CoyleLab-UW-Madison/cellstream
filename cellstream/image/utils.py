@@ -46,11 +46,10 @@ def downsample(
     _, _, H, W = tensor.shape
 
     # --- Determine target size from scale ---
-    if isinstance(scale, float):
-        new_H = max(1, int(round(H * scale)))
-        new_W = max(1, int(round(W * scale)))
-    else:
-        new_H, new_W = scale
+    
+    new_H = max(1, int(round(H * scale)))
+    new_W = max(1, int(round(W * scale)))
+
 
     target_size = (new_H, new_W)
 
