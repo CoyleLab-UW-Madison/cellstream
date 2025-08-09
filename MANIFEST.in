@@ -2,8 +2,5 @@
 include README.md
 recursive-include cellstream *.py
 
-# Optional: include only small sample/example files
-# recursive-include examples *.py
-
-# Or, exclude examples entirely:
+# Exclude examples entirely:
 prune examples

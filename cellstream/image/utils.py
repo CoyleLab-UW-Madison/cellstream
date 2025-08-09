@@ -103,8 +103,10 @@ def convolve_along_timeseries(video_tensor, kernel_weights, batch_size=512):
 def color_by_axis(img: torch.Tensor, cmap='turbo', proj='max', minmax_norm=True):
     
     """
-    Apply a colormap along time (T) for each channel in (T, C, X, Y),
+    Apply a colormap along 0 axis (typically frequencey or scale bins) (F, C, X, Y),
     returning (C, X, Y, 3) RGB images.
+
+    5D images are accomodated by conversion to 4D and back.
 
     Parameters:
         img: (T, C, X, Y) tensor
@@ -115,15 +117,26 @@ def color_by_axis(img: torch.Tensor, cmap='turbo', proj='max', minmax_norm=True)
     Returns:
         (C, X, Y, 3) tensor of RGB images
     """
-    T, C, X, Y = img.shape
-    
+
+    img_ndim=img.dim()
+    five_d=False
+    if img_ndim==4:
+        print("4D")
+        F, C, X, Y = img.shape
+    elif img_ndim==5: #coming from generate_cwt_features
+        five_d=True
+        C,T,F,X,Y = img.shape
+        img=img.permute(2,0,1,3,4) #F,T,C,X,Y
+        img=img.reshape(F,T*C,X,Y) #4D w/ T*C bins
+        C=T*C
+ 
     if minmax_norm==True:
         img_min=torch.min(img)
         img_max=torch.max(img)
         img=(img-img_min)/(img_max-img_min)
 
     # (T, 3) colormap, normalized to [0,1]
-    colors = torch.tensor(plt.get_cmap(cmap).resampled(T)(range(T)), dtype=img.dtype)[:, :3]  # (T, 3)
+    colors = torch.tensor(plt.get_cmap(cmap).resampled(F)(range(F)), dtype=img.dtype)[:, :3]  # (F, 3)
 
     # (T, 1, 1, 3) for broadcasting
     colors = colors[:, None, None, :]
@@ -147,15 +160,8 @@ def color_by_axis(img: torch.Tensor, cmap='turbo', proj='max', minmax_norm=True)
 
         out[c] = proj_rgb
 
-    return out  # shape: (C, X, Y, 3)
+    if five_d==True:
+        out=torch.stack(out.split(T),dim=1)
+        
+    return out  
 
-# def color_by_fft_features(img,cmap='turbo',proj='max'):
-#     slices,x,y=img.shape
-#     cc=plt.colormaps.get_cmap(cmap).resampled(slices)(range(slices))
-#     CC=torch.broadcast_to(cc,(x,y,slices,4)).swapaxes(0,2)[:,:,:,0:3].T
-#     outstack=((CC*(img.T).swapaxes(0,1)).T)
-#     if proj=='max':
-#         out=(outstack.max(axis=0)).swapaxes(0,1)
-#     elif proj=='sum':
-#         out=(outstack.sum(axis=0)).swapaxes(0,1)
-#     return out
