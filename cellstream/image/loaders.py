@@ -14,7 +14,8 @@ import torch
 
 def load_image(image_filename):
     """Load image from file and convert to torch tensor"""
-    iname, iext = image_filename.split(".")
+    *iname, iext = image_filename.split(".")
+    iname = ".".join(iname)
     if iext == "nd2":
         image = nd2.imread(image_filename)
     elif iext == "tif":
@@ -31,7 +32,8 @@ def load_image(image_filename):
 
 def load_masks(masks_filename):
     """Load masks from file and convert to torch tensor"""
-    mname, mext = masks_filename.split(".")
+    *mname, mext = masks_filename.split(".")
+    mname = ".".join(mname)
     if mext == "nd2":
         masks = nd2.imread(masks_filename)
     elif mext == "tif":
