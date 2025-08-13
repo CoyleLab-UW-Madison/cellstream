@@ -65,6 +65,7 @@ def downsample(tensor, scale, is_mask=False):
 
 def normalize_histogram(image):
     # correct for intensity changes over time
+    image = normalize_dims(image, 1)
     T, C, X, Y = image.shape
     image = image.reshape(T, C, X * Y)
     image = (
@@ -165,3 +166,29 @@ def color_by_axis(img: torch.Tensor, cmap="turbo", proj="max", minmax_norm=True)
         out = torch.stack(out.split(T), dim=1)
 
     return out
+
+
+def normalize_dims(image, channel_dim):
+    """
+    Normalize the number of dimensions for input images to 4, and return the image.
+    If no channel dimension is detected, one is added using unsqueeze().
+    Similiar to cellstream.image.loaders.load_image().
+
+    Parameters:
+        image: image tensor with 3 dimensions (single channel) or 4 dimensions (multi-channel).
+        channel_dim: axis to unsqueeze if single-channel image is detected.
+
+    Returns:
+        image: 4D tensor of images with C channels. Dimensions are
+                determined by input image and channel_dim parameter.
+    """
+    if len(image.shape) == 4:
+        return image
+    elif len(image.shape) == 3:
+        print("Single-channel image detected; adding channel dimension...")
+        image = image.unsqueeze(channel_dim)
+        return image
+    else:
+        raise ValueError(
+            f"Expected an image with dimension 3 or 4. Got an image with dimension {len(image.shape)}"
+        )

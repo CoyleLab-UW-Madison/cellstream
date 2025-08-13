@@ -29,7 +29,7 @@ import progressbar
 import torch
 from torch_scatter import scatter_mean, scatter_std
 
-from ..image.utils import downsample
+from ..image.utils import normalize_dims, downsample
 from ..image.utils import normalize_histogram as norm_hist
 
 
@@ -235,6 +235,7 @@ def generate_cwt_image_cellstreams(
         img = img - img.mean(axis=0)
 
     # reshape image for blocked processing
+    img = normalize_dims(img, 1)
     T, C, X, Y = img.shape
     img = img.reshape(T, C, X * Y).permute(2, 1, 0)  # shape is now (x*y,c,t)
 

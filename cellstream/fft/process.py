@@ -36,7 +36,7 @@ import progressbar
 import torch
 
 from ..image.loaders import load_image, load_masks
-from ..image.utils import downsample
+from ..image.utils import downsample, normalize_dims
 from .utils import extract_single_cell_data, generate_fft_features, query_fft_features
 
 
@@ -196,6 +196,7 @@ def process_image_cellstreams(
         Raw FFT features dictionary (if `return_fft_features=True`).
     """
 
+    image = normalize_dims(image, 1)
     T, C, X, Y = image.shape
 
     if channel_names is None:
