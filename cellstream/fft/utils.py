@@ -27,6 +27,7 @@ Main Components:
 
 import torch
 from torch_scatter import scatter_mean, scatter_std
+from ..image.utils import normalize_dims
 from ..image.utils import normalize_histogram as norm_hist
 import progressbar
 
@@ -67,6 +68,8 @@ def generate_fft_features(
     feature_map : dict
         Dictionary of FFT features keyed by feature type, each of shape (F, C, X, Y).
     """
+    
+    image = normalize_dims(image, 1)
     
     T, C, X, Y = image.shape
     F = T // 2 + 1

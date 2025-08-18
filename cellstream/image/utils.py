@@ -72,10 +72,34 @@ def downsample(
 def normalize_histogram(image):
     
     #correct for intensity changes over time
+    image = normalize_dims(image, 1)
     T,C,X,Y=image.shape
     image=image.reshape(T,C,X*Y)
     image=((image-image.mean(axis=2,keepdim=True))/(image.std(axis=2,keepdim=True))).reshape(T,C,X,Y)
     return image
+
+def normalize_dims(image, channel_dim):
+    """
+    Normalize the number of dimensions for input images to 4, and return the image.
+    If no channel dimension is detected, one is added using unsqueeze().
+    Similiar to cellstream.image.loaders.load_image().
+    Parameters:
+        image: image tensor with 3 dimensions (single channel) or 4 dimensions (multi-channel).
+        channel_dim: axis to unsqueeze if single-channel image is detected.
+    Returns:
+        image: 4D tensor of images with C channels. Dimensions are
+                determined by input image and channel_dim parameter.
+    """
+    if len(image.shape) == 4:
+        return image
+    elif len(image.shape) == 3:
+        print("Single-channel image detected; adding channel dimension...")
+        image = image.unsqueeze(channel_dim)
+        return image
+    else:
+        raise ValueError(
+            f"Expected an image with dimension 3 or 4. Got an image with dimension {len(image.shape)}"
+        )
 
 def convolve_along_timeseries(video_tensor, kernel_weights, batch_size=512):
     T, C, H, W = video_tensor.shape
@@ -165,3 +189,41 @@ def color_by_axis(img: torch.Tensor, cmap='turbo', proj='max', minmax_norm=True)
         
     return out  
 
+
+#patch napari to accept tensors for adding to viewer
+
+
+import functools
+def _to_numpy(x):
+    if isinstance(x, torch.Tensor):
+        return x.detach().cpu().numpy()
+    return x
+
+# for Viewer.add_* methods
+def _wrap_add_method(method):
+    @functools.wraps(method)
+    def wrapper(self, data, *args, **kwargs):
+        return method(self, _to_numpy(data), *args, **kwargs)
+    return wrapper
+
+# for top-level napari.view_* helpers
+def _wrap_add_func(func):
+
+    @functools.wraps(func)
+    def wrapper(data, *args, **kwargs):
+        return func(_to_numpy(data), *args, **kwargs)
+    return wrapper
+
+def patch_napari_for_torch():
+    # patch Viewer methods
+    import napari
+    napari.Viewer.add_image  = _wrap_add_method(napari.Viewer.add_image)
+    napari.Viewer.add_labels = _wrap_add_method(napari.Viewer.add_labels)
+    napari.Viewer.add_points = _wrap_add_method(napari.Viewer.add_points)
+    napari.Viewer.add_shapes = _wrap_add_method(napari.Viewer.add_shapes)
+
+    # patch top-level helpers
+    napari.view_image  = _wrap_add_func(napari.view_image)
+    napari.view_labels = _wrap_add_func(napari.view_labels)
+    napari.view_points = _wrap_add_func(napari.view_points)
+    napari.view_shapes = _wrap_add_func(napari.view_shapes)

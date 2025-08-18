@@ -29,7 +29,7 @@ import warnings
 
 from torch_scatter import scatter_mean, scatter_std
 
-from ..image.utils import downsample
+from ..image.utils import downsample, normalize_dims
 from ..image.utils import normalize_histogram as norm_hist
 
 def query_cwt_block(
@@ -204,6 +204,8 @@ def generate_cwt_image_cellstreams(
     #gpu environment setup for squeezepy
     os.environ['SSQ_GPU'] = '1' if use_gpu else '0'
     from ssqueezepy import cwt 
+    
+    img = normalize_dims(img, 1)
     
     if sampling is not None:
         from ssqueezepy.experimental import scale_to_freq 
