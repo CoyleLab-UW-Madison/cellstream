@@ -122,7 +122,10 @@ def generate_fft_features(
                 buffers["z_score"][:, :, start:end] = z[:max_bin].cpu()
 
             if "phase" in fft_features_to_process:
-                phase = fft_chunk.angle()
+                try:
+                    phase = fft_chunk.angle()
+                except NotImplemented:
+                    phase = fft_chunk.cpu().angle().to_device(device)
                 buffers["phase"][:, :, start:end] = phase[:max_bin].cpu()
 
             bar.update(end)
@@ -146,7 +149,10 @@ def generate_fft_features(
             feature_map["z_score"] = z[:max_bin]
 
         if "phase" in fft_features_to_process:
-            phase = fft.angle()
+            try:
+                phase = fft.angle()
+            except NotImplemented:
+                phase = fft.cpu().angle().to_device(device)
             feature_map["phase"] = phase[:max_bin]
 
     return feature_map
