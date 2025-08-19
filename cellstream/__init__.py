@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Created on Sat Jul 19 14:13:54 2025
 
@@ -6,9 +5,7 @@ Created on Sat Jul 19 14:13:54 2025
 """
 
 # Optional convenience re-exports
-from . import image
-from . import fft
-from . import cwt
+from . import cwt, fft, image
 
 __version__ = "0.1.0"
 
