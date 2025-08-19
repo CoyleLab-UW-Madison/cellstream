@@ -41,7 +41,7 @@ def query_cwt_block(
     normalize_amplitudes=False,
     carrier_channel=0,
     channel_outputs={0: ["amp", "freq", "phase"]},
-    use_gpu=False,
+    device="cpu",
     bank_method="max_pool",
     sampling=None,
     **ssqueezepy_cwt_kwargs,
@@ -60,7 +60,7 @@ def query_cwt_block(
     """
 
     # Force environment variable BEFORE import
-    os.environ["SSQ_GPU"] = "1" if use_gpu else "0"
+    os.environ["SSQ_GPU"] = "1" if "cuda" in device else "0"
     from ssqueezepy import cwt
 
     # Prepare shapes
@@ -90,7 +90,10 @@ def query_cwt_block(
     # Find max_scale channels along scale dimension
 
     carrier_amp = split_channels[carrier_channel].abs()
-    carrier_phase = split_channels[carrier_channel].angle()
+    try:
+        carrier_phase = split_channels[carrier_channel].angle()
+    except NotImplemented:
+        carrier_phase = split_channels[carrier_channel].cpu().angle().to_device(device)
 
     # manage filter-banking methods:
 
@@ -114,7 +117,12 @@ def query_cwt_block(
         carrier_amp, carrier_freq = torch.sort(
             split_channels[carrier_channel].abs(), axis=1, descending=True
         )
-        carrier_phase = split_channels[carrier_channel].angle()
+        try:
+            carrier_phase = split_channels[carrier_channel].angle()
+        except NotImplemented:
+            carrier_phase = (
+                split_channels[carrier_channel].cpu().angle().to_device(device)
+            )
         carrier_phase = torch.gather(carrier_phase, 1, carrier_freq)
 
     # Prepare outputs dictionary
@@ -143,7 +151,7 @@ def query_cwt_block(
             BATCH_SIZE, T, -1
         )
         freqs_lookup = freqs_lookup.permute(0, 2, 1)  # (batch, scales, time)
-        if use_gpu:
+        if "cuda" in device:
             freqs_lookup = freqs_lookup.to("cuda")
         carrier_freq_converted = torch.gather(freqs_lookup, 1, carrier_freq + min_scale)
 
@@ -153,7 +161,10 @@ def query_cwt_block(
             P = P / split_channels_full_power_sums[channel]
         if ("phase" in returns) or ("phase_difference" in returns):
             # only compute phase if needed
-            PH = split_channels[channel].angle()
+            try:
+                PH = split_channels[channel].angle()
+            except NotImplemented:
+                PH = split_channels[channel].cpu().angle().to_device(device)
             ch_ph = torch.gather(PH, 1, carrier_freq)
         if "phase" in returns:
             results[channel]["phase"] = ch_ph[:, :num_filter_banks, :].cpu()
@@ -195,7 +206,7 @@ def generate_cwt_image_cellstreams(
     num_filter_banks=1,
     normalize_amplitudes=False,
     blocks=10,
-    use_gpu=False,
+    device="cpu",
     bank_method="max_pool",
     downsample_by=None,
     normalize_histogram=True,
@@ -216,7 +227,7 @@ def generate_cwt_image_cellstreams(
         Dictionary of requested outputs as numpy arrays
     """
     # gpu environment setup for squeezepy
-    os.environ["SSQ_GPU"] = "1" if use_gpu else "0"
+    os.environ["SSQ_GPU"] = "1" if "cuda" in device else "0"
 
     img = normalize_dims(img, 1)
 
@@ -267,7 +278,7 @@ def generate_cwt_image_cellstreams(
             normalize_amplitudes=normalize_amplitudes,
             carrier_channel=carrier_channel,
             channel_outputs=channel_outputs,
-            use_gpu=use_gpu,
+            device=device,
             sampling=sampling,
             **ssqueezepy_cwt_kwargs,
         )
