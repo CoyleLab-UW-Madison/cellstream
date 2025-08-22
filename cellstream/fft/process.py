@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 cellstream.fft.process
 
@@ -28,24 +27,20 @@ Functions:
 
 """
 
-import torch
-import pandas as pd
 import os
-import progressbar
 import re
-    
-from .utils import generate_fft_features
-from .utils import query_fft_features
-from .utils import extract_single_cell_data
+
+import pandas as pd
+import progressbar
+import torch
+
+from ..image.loaders import load_image, load_masks
 from ..image.utils import downsample, normalize_dims
-from ..image.loaders import load_image
-from ..image.loaders import load_masks
+from .utils import extract_single_cell_data, generate_fft_features, query_fft_features
+
 
 def create_dataframe(
-    results, 
-    channel_names=None, 
-    image_filename=None, 
-    masks_filename=None
+    results, channel_names=None, image_filename=None, masks_filename=None
 ):
     """
     Convert the dictionary of per-cell results into a structured DataFrame.
@@ -66,16 +61,16 @@ def create_dataframe(
     df : pandas.DataFrame
         Wide-form table with per-cell stats (mean, sd) for each channel and feature.
     """
-    
+
     # Pick one entry to get number of masks
     first_key = next(iter(results))
     num_cells = results[first_key][next(iter(results[first_key]))].shape[1]
 
-    if channel_names==None:
-        first_result=results[first_key]
+    if channel_names is None:
+        first_result = results[first_key]
         first_results_key = next(iter(first_result))
         num_channels = first_result[first_results_key].shape[0]
-        channel_names=[]
+        channel_names = []
         for i in range(num_channels):
             channel_names.append(f"Channel {i}")
 
@@ -100,8 +95,8 @@ def create_dataframe(
 
     return pd.DataFrame(df_data)
 
+
 def reshape_to_longform(df):
-    
     """
     Reshape wide-form FFT feature DataFrame to tidy/long-form.
 
@@ -122,10 +117,17 @@ def reshape_to_longform(df):
     value_vars = [col for col in df.columns if col not in id_vars]
 
     # Melt into long form
-    long_df = df.melt(id_vars=id_vars, value_vars=value_vars, var_name="measurement", value_name="value")
+    long_df = df.melt(
+        id_vars=id_vars,
+        value_vars=value_vars,
+        var_name="measurement",
+        value_name="value",
+    )
 
     # Extract structured fields using regex
-    pattern = re.compile(r"(?P<channel>[^_]+)_(?P<feature>[^_]+)_(?P<stat>mean|sd)(?:_(?P<mask_type>.*))?")
+    pattern = re.compile(
+        r"(?P<channel>[^_]+)_(?P<feature>[^_]+)_(?P<stat>mean|sd)(?:_(?P<mask_type>.*))?"
+    )
 
     extracted = long_df["measurement"].str.extract(pattern)
     long_df = pd.concat([long_df, extracted], axis=1).drop(columns="measurement")
@@ -135,20 +137,20 @@ def reshape_to_longform(df):
 
     return long_df
 
+
 def process_image_cellstreams(
     image,
-    masks, 
-    cutoff_frequency_bin=0, 
-    carrier_index=0, 
-    channel_names=None, 
+    masks,
+    cutoff_frequency_bin=0,
+    carrier_index=0,
+    channel_names=None,
     threshold_cutoffs=None,
     return_fft_features=False,
     image_filename=None,
     masks_filename=None,
     downsample_by=None,
-    **kwargs
+    **kwargs,
 ):
-    
     """
     Full FFT-based processing pipeline for a single image and mask set.
 
@@ -192,67 +194,64 @@ def process_image_cellstreams(
     fft_features : dict (optional)
         Raw FFT features dictionary (if `return_fft_features=True`).
     """
-    
+
     image = normalize_dims(image, 1)
     T, C, X, Y = image.shape
-    
+
     if channel_names is None:
-        channel_names = [f'channel_{i}' for i in range(C)]
+        channel_names = [f"channel_{i}" for i in range(C)]
     elif len(channel_names) != C:
         raise ValueError(f"Expected {C} channel names, got {len(channel_names)}")
-    
+
     if downsample_by is not None:
         image = downsample(image, downsample_by)
         masks = downsample(masks, downsample_by, is_mask=True)
 
     mean_image = image.mean(axis=0)
-    
+
     print("Generating FFT features...")
-    fft_features = generate_fft_features(image,**kwargs)
+    fft_features = generate_fft_features(image, **kwargs)
 
     print(f"Querying FFT features using channel {carrier_index} as carrier...")
-    queried_fft_features = query_fft_features(fft_features, cutoff_frequency_bin, carrier_index,**kwargs)
+    queried_fft_features = query_fft_features(
+        fft_features, cutoff_frequency_bin, carrier_index, **kwargs
+    )
 
     # --- Normalize input mask(s) to a dictionary ---
     if isinstance(masks, dict):
         masks_dict = {k: v.clone() for k, v in masks.items()}
     else:
-        masks_dict = {'all': masks.clone()}
-    
+        masks_dict = {"all": masks.clone()}
+
     if threshold_cutoffs is not None:
         for feature_name, threshold in threshold_cutoffs.items():
-            queried_feature_key=f"queried_{feature_name}"
+            queried_feature_key = f"queried_{feature_name}"
             if queried_feature_key in queried_fft_features.keys():
                 feature_vals = queried_fft_features[queried_feature_key][carrier_index]
                 mask = (feature_vals > threshold).int() * masks.clone()
-                masks_dict[f"thresh_{queried_feature_key}_at_{threshold}"] = mask.to(dtype=torch.int64)
+                masks_dict[f"thresh_{queried_feature_key}_at_{threshold}"] = mask.to(
+                    dtype=torch.int64
+                )
             else:
-                print(f"[warn] Feature '{queried_feature_key}' not found in queried_fft_features. Skipping threshold.")
+                print(
+                    f"[warn] Feature '{queried_feature_key}' not found in queried_fft_features. Skipping threshold."
+                )
 
-    
     # if cutoff_power is not None:
     #     carrier_amp = queried_fft_features['queried_norm_amplitudes'][carrier_index]
     #     masks_th = (carrier_amp > cutoff_power).int() * masks.clone()
     #     masks_dict['thresholded'] = masks_th.to(dtype=torch.int64)
-    
+
     print("Extracting single-cell data...")
-    results = extract_single_cell_data(
-        masks_dict, queried_fft_features, mean_image
-    )
-    
+    results = extract_single_cell_data(masks_dict, queried_fft_features, mean_image)
+
     print("making dataframe...")
-    df = create_dataframe(
-        results, channel_names, image_filename, masks_filename
-    )
+    df = create_dataframe(results, channel_names, image_filename, masks_filename)
 
     return (df, fft_features) if return_fft_features else df
 
-def process_folder_cellstreams(
-        images_directory,
-        masks_directory,
-        **kwargs
-    ):
 
+def process_folder_cellstreams(images_directory, masks_directory, **kwargs):
     """
     Batch process all images and masks in a folder using FFT feature extraction.
 
@@ -271,35 +270,34 @@ def process_folder_cellstreams(
     all_data : pandas.DataFrame
         Combined DataFrame of all per-cell results from the folder.
     """
-    
+
     images = os.listdir(images_directory)
-    
+
     # Process the positive images
     data = []
     for image_filename in progressbar.progressbar(images):
-        name, ext = image_filename.split('.')
-        
-        if ext in ['nd2', 'tif']:
+        name, ext = image_filename.split(".")
+
+        if ext in ["nd2", "tif"]:
             masks_filename = f"{name}_masks.tif"
             image_path = os.path.join(images_directory, image_filename)
             mask_path = os.path.join(masks_directory, masks_filename)
-    
-        
+
             print(f"Processing: {image_path} with {mask_path}")
             print("Loading images...")
-            image=load_image(image_path)
-            masks=load_masks(mask_path)
-            
-            try: 
+            image = load_image(image_path)
+            masks = load_masks(mask_path)
+
+            try:
                 pos_data_for_image = process_image_cellstreams(
                     image,
                     masks,
                     image_filename=image_filename,
                     masks_filename=masks_filename,
-                    **kwargs
+                    **kwargs,
                 )
                 data.append(pos_data_for_image)
-                
+
             except Exception as e:
                 print(f"Error processing {image}: {e}")
     data = pd.concat(data, ignore_index=True)
