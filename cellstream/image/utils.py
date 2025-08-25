@@ -194,8 +194,6 @@ def color_by_axis(img: torch.Tensor, cmap="turbo", proj="max", minmax_norm=True)
     return out
 
 
-
-
 # patch napari to accept tensors for adding to viewer
 def _to_numpy(x):
     if isinstance(x, torch.Tensor):

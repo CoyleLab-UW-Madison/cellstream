@@ -19,7 +19,7 @@ results = cellstream.cwt.generate_cwt_image_cellstreams(
     max_scale=180,
     num_filter_banks=20,
     blocks=50,
-    use_gpu=True,
+    device="cuda",
     bank_method="max_pool",
     normalize_amplitudes=False,
     ###pre-processing
