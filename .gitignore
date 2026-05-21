@@ -1,3 +1,4 @@
+raw_data
 examples/raw
 *.egg-info/
 __pycache__/

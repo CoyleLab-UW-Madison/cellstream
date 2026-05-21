@@ -1,6 +1,6 @@
 [project]
 name = "cellstream"
-version = "0.1.0"
+version = "0.1.1"
 description = "Microscopy and single-cell signal processing analysis tools"
 authors = [{ name = "Coyle Lab @ UW-Madison" }]
 readme = "README.md"
@@ -14,6 +14,7 @@ dependencies = [
     "nd2",
     "progressbar2",
     "ssqueezepy",
+    "zarr"
 ]
 
 [tool.setuptools]

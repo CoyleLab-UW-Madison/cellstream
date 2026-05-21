@@ -1,0 +1,76 @@
+"""
+cellstream.hilbert
+
+Hilbert transform for computing analytical signals and instantaneous phase/amplitude.
+"""
+
+import torch
+import progressbar
+from .utils import normalize_dims, normalize_histogram as norm_hist
+
+def hilbert_transform(
+    image,
+    normalize_histogram=True,
+    batch_size=None,
+    device=None,
+):
+    """
+    Compute the Hilbert transform of an image timeseries.
+    Expects (T, C, X, Y) tensor.
+    """
+    image = normalize_dims(image, 1)
+    T, C, X, Y = image.shape
+    
+    if normalize_histogram:
+        image = norm_hist(image)
+
+    mean_image = image.mean(axis=0)
+    image = image - mean_image
+
+    if device is None:
+        device = image.device
+
+    if batch_size is not None:
+        image = image.reshape(T, C, X * Y)
+        bar = progressbar.ProgressBar(max_value=X * Y)
+        ht_image = torch.zeros((T, C, X * Y), dtype=torch.complex64)
+
+        for start in range(0, X * Y, batch_size):
+            end = min(start + batch_size, X * Y)
+            batch = image[:, :, start:end].to(device)
+            ht_chunk = _process_hilbert_batch(batch)
+            ht_image[:, :, start:end] = ht_chunk.cpu()
+            bar.update(end)
+        
+        return ht_image.reshape(T, C, X, Y)
+    else:
+        return _process_hilbert_batch(image.to(device)).reshape(T, C, X, Y)
+
+def _process_hilbert_batch(batch):
+    """
+    Compute Hilbert transform on a batch (T, ...).
+    """
+    T = batch.shape[0]
+    # FFT along time axis
+    freqs = torch.fft.rfft(batch, axis=0)
+    # The Hilbert transform in frequency domain:
+    # H(f) = -j * sgn(f)
+    # For rfft, we have only positive frequencies.
+    # We want to create the analytic signal: A = Real + j*Imag
+    # Imag = IFT(-j * FT(Real))
+    
+    # Simple analytic signal via FFT: 
+    # 1. FT the real signal
+    # 2. Zero out negative frequencies (already done by rfft)
+    # 3. Double the positive frequencies (except DC and Nyquist)
+    # 4. IFT back
+    
+    # But here we just want the imaginary part to form the complex tensor?
+    # Or return the full analytic signal.
+    
+    transforms = -1j * freqs
+    transforms[0] = 0 # zero DC
+    imaginary = torch.fft.irfft(transforms, n=T, axis=0)
+    real = batch
+    
+    return torch.complex(real, imaginary)

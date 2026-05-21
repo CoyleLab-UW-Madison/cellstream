@@ -28,114 +28,14 @@ Functions:
 """
 
 import os
-import re
-
-import pandas as pd
 import progressbar
 import torch
+import pandas as pd
 
-from ..image.loaders import load_image, load_masks
-from ..image.utils import downsample, normalize_dims
-from .utils import extract_single_cell_data, generate_fft_features, query_fft_features
-
-
-def create_dataframe(
-    results, channel_names=None, image_filename=None, masks_filename=None
-):
-    """
-    Convert the dictionary of per-cell results into a structured DataFrame.
-
-    Parameters:
-    -----------
-    results : dict
-        Dictionary mapping mask names to dicts of per-cell channel-level features.
-    channel_names : list of str, optional
-        Channel names to label columns; otherwise defaults to "Channel i".
-    image_filename : str, optional
-        Name of the original image file (for tracking).
-    masks_filename : str, optional
-        Name of the corresponding mask file.
-
-    Returns:
-    --------
-    df : pandas.DataFrame
-        Wide-form table with per-cell stats (mean, sd) for each channel and feature.
-    """
-
-    # Pick one entry to get number of masks
-    first_key = next(iter(results))
-    num_cells = results[first_key][next(iter(results[first_key]))].shape[1]
-
-    if channel_names is None:
-        first_result = results[first_key]
-        first_results_key = next(iter(first_result))
-        num_channels = first_result[first_results_key].shape[0]
-        channel_names = []
-        for i in range(num_channels):
-            channel_names.append(f"Channel {i}")
-
-    df_data = {
-        "mask_index": torch.arange(num_cells).detach().cpu().numpy(),
-        "image_filename": image_filename,
-        "mask_filename": masks_filename,
-    }
-
-    def add_to_df(result_dict, suffix=""):
-        for key, tensor in result_dict.items():
-            is_sd = key.endswith("_sd")
-            base = key[:-3] if is_sd else key
-            stat_suffix = "_sd" if is_sd else "_mean"
-            for ch_idx, ch_name in enumerate(channel_names):
-                colname = f"{ch_name}_{base}{stat_suffix}{suffix}"
-                df_data[colname] = tensor[ch_idx].detach().cpu().numpy()
-
-    for mask_name, result in results.items():
-        suffix = "" if mask_name == "all" else f"___{mask_name}"
-        add_to_df(result, suffix=suffix)
-
-    return pd.DataFrame(df_data)
-
-
-def reshape_to_longform(df):
-    """
-    Reshape wide-form FFT feature DataFrame to tidy/long-form.
-
-    Parameters:
-    -----------
-    df : pandas.DataFrame
-        Wide-form output from `create_dataframe`.
-
-    Returns:
-    --------
-    long_df : pandas.DataFrame
-        Long-form DataFrame with columns:
-        ['mask_index', 'image_filename', 'mask_filename',
-         'channel', 'feature', 'stat', 'mask_type', 'value']
-    """
-
-    id_vars = ["mask_index", "image_filename", "mask_filename"]
-    value_vars = [col for col in df.columns if col not in id_vars]
-
-    # Melt into long form
-    long_df = df.melt(
-        id_vars=id_vars,
-        value_vars=value_vars,
-        var_name="measurement",
-        value_name="value",
-    )
-
-    # Extract structured fields using regex
-    pattern = re.compile(
-        r"(?P<channel>[^_]+)_(?P<feature>[^_]+)_(?P<stat>mean|sd)(?:_(?P<mask_type>.*))?"
-    )
-
-    extracted = long_df["measurement"].str.extract(pattern)
-    long_df = pd.concat([long_df, extracted], axis=1).drop(columns="measurement")
-
-    # Fill NaNs in mask_type with 'all' (default mask)
-    long_df["mask_type"] = long_df["mask_type"].fillna("all")
-
-    return long_df
+from ..io import load_image, load_masks
+from ..utils import downsample, normalize_dims
+from ..analysis import extract_single_cell_data, create_dataframe, reshape_to_longform
+from .utils import generate_fft_features, query_fft_features
 
 
 def process_image_cellstreams(

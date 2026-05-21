@@ -1,14 +1,13 @@
 """
-Created on Sat Jul 19 14:13:54 2025
+cellstream.cwt
 
-@author: smcoyle
+Continuous Wavelet Transform (CWT) processing and feature extraction.
 """
 
-# Optional convenience re-exports
 from .utils import (
-    extract_cwt_cellstreams,
-    generate_cwt_image_cellstreams,
     query_cwt_block,
+    generate_cwt_image_cellstreams,
+    extract_cwt_cellstreams,
 )
 
 __all__ = [

@@ -23,14 +23,14 @@ Functions:
 
 import os
 import warnings
-
 import numpy as np
 import progressbar
 import torch
+
 from torch_scatter import scatter_mean, scatter_std
 
-from ..image.utils import downsample, normalize_dims
-from ..image.utils import normalize_histogram as norm_hist
+from ..utils import downsample, normalize_dims, normalize_histogram as norm_hist
+from ..analysis import extract_single_cell_data
 
 
 def query_cwt_block(
@@ -187,6 +187,86 @@ def query_cwt_block(
 
     return results
 
+def _infer_blocks(
+    img_shape,
+    use_gpu,
+    channel_outputs,
+    buffer_fraction=0.2,
+    **ssqueezepy_cwt_kwargs,
+):
+    """
+    Infers the number of blocks to use for processing based on available memory.
+    """
+    T, C, X, Y = img_shape
+    total_pixels = X * Y
+
+    num_outputs=sum(len(outputs) for outputs in channel_outputs.values())
+    if num_outputs==0:
+        num_outputs=1
+    buffer_fraction=buffer_fraction/num_outputs
+
+    if use_gpu:
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                total_mem = torch.cuda.get_device_properties(0).total_memory
+                available_mem = total_mem - torch.cuda.memory_allocated(0)
+                mem_to_use = available_mem * buffer_fraction
+            else:
+                warnings.warn(
+                    "GPU not available, falling back to default block size of 10."
+                )
+                return 10
+        except ImportError:
+            warnings.warn("PyTorch not found, falling back to default block size of 10.")
+            return 10
+    else:
+        # For CPU, let's just use a default for now.
+        warnings.warn(
+            "Automatic block size for CPU is not yet implemented, falling back to default block size of 10."
+        )
+        return 10
+
+    os.environ["SSQ_GPU"] = "1" if use_gpu else "0"
+    try:
+        from ssqueezepy import cwt
+        import torch
+
+        dummy_input = torch.zeros(T)
+        if use_gpu:
+            if torch.cuda.is_available():
+                dummy_input = dummy_input.to("cuda")
+            else:  # handles case where torch is installed but cuda not available
+                warnings.warn(
+                    "GPU not available, falling back to default block size of 10."
+                )
+                return 10
+
+        _, scales = cwt(dummy_input, **ssqueezepy_cwt_kwargs)
+        num_scales = len(scales)
+
+        # Memory for one pixel's CWT result (complex64 -> 8 bytes)
+        mem_per_pixel_cwt = num_scales * T * 8  # 8 bytes for complex64
+
+        num_channels_to_process = len(channel_outputs)
+
+        # Total memory for CWTs for one pixel across all processed channels
+        total_mem_per_pixel = mem_per_pixel_cwt * num_channels_to_process
+
+        # Max pixels we can process in a single block
+        # Add a small epsilon to avoid division by zero
+        max_pixels_in_block = mem_to_use / (total_mem_per_pixel + 1e-9)
+
+        # How many blocks we need
+        num_blocks = total_pixels / (max_pixels_in_block + 1e-9)
+
+        return int(np.ceil(num_blocks))
+
+    except ImportError:
+        warnings.warn("ssqueezepy not found, falling back to default block size of 10.")
+        return 10
 
 def generate_cwt_image_cellstreams(
     img,
@@ -235,6 +315,15 @@ def generate_cwt_image_cellstreams(
     if mean_center is not False:
         print("Mean centering timeseries ...")
         img = img - img.mean(axis=0)
+
+    if blocks == "auto":
+            blocks = _infer_blocks(
+                img.shape,
+                use_gpu=use_gpu,
+                channel_outputs=channel_outputs,
+                **ssqueezepy_cwt_kwargs,
+            )
+            print(f"Automatically determined block size: {blocks}")
 
     # reshape image for blocked processing
     T, C, X, Y = img.shape

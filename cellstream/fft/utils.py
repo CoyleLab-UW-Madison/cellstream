@@ -23,13 +23,86 @@ Main Components:
     Aggregates FFT-derived features at the single-cell level using segmentation masks.
 """
 
+import warnings
 import progressbar
 import torch
-from torch_scatter import scatter_mean, scatter_std
 
-from ..image.utils import normalize_dims
-from ..image.utils import normalize_histogram as norm_hist
+from ..utils import normalize_dims, normalize_histogram as norm_hist
+from ..analysis import extract_single_cell_data
 
+
+def _infer_batch_size(
+    img_shape,
+    device,
+    fft_features_to_process,
+    max_bin,
+    buffer_fraction=0.5,
+):
+    """
+    Infers the batch size to use for processing based on available memory.
+    """
+    try:
+        import torch
+    except ImportError:
+        warnings.warn(
+            "PyTorch not found, which is required for FFT processing. "
+            "Cannot infer batch size. Falling back to no batching."
+        )
+        return None
+
+    T, C, X, Y = img_shape
+    mem_to_use = 0
+
+    if device == 'cuda' and torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        total_mem = torch.cuda.get_device_properties(0).total_memory
+        available_mem = total_mem - torch.cuda.memory_allocated(0)
+        mem_to_use = available_mem * buffer_fraction
+    else:
+        if device == 'cuda' and not torch.cuda.is_available():
+            warnings.warn("GPU not available, falling back to CPU-based batch size inference.")
+        
+        try:
+            import psutil
+            available_mem = psutil.virtual_memory().available
+            mem_to_use = available_mem * buffer_fraction
+        except ImportError:
+            warnings.warn(
+                "psutil not found. Cannot infer batch size for CPU. "
+                "Please install psutil (`pip install psutil`) for this feature, "
+                "or specify `batch_size` manually. Falling back to no batching."
+            )
+            return None
+
+    F = T // 2 + 1
+    if max_bin is None:
+        max_bin = F
+    
+    # Peak memory usage within the loop for a single pixel
+    # fft_chunk (complex64) + amp (float32) + other intermediates
+    mem_per_pixel = (F * C * 8) + (F * C * 4) 
+
+    # Add memory for the features that are computed
+    num_features = len(fft_features_to_process)
+    # This is a conservative estimate, assuming all features need temporary storage of size F*C*4
+    # A more precise calculation would depend on which features are requested.
+    if "normalized_amplitude" in fft_features_to_process:
+        mem_per_pixel += F * C * 4
+    if "z_score" in fft_features_to_process:
+        mem_per_pixel += F * C * 4
+    if "phase" in fft_features_to_process:
+        # phase is derived from fft_chunk, so amp is not needed at the same time
+        # but let's be conservative
+        pass
+
+    # Add a small epsilon to avoid division by zero
+    if mem_per_pixel == 0: mem_per_pixel = 1
+
+    max_pixels_in_batch = mem_to_use / mem_per_pixel
+    
+    if max_pixels_in_batch < 1: max_pixels_in_batch = 1
+
+    return int(max_pixels_in_batch)
 
 def generate_fft_features(
     image,
@@ -74,6 +147,15 @@ def generate_fft_features(
     """
 
     image = normalize_dims(image, 1)
+
+    if batch_size == "auto":
+            batch_size = _infer_batch_size(
+                image.shape,
+                device,
+                fft_features_to_process,
+                max_bin,
+            )
+            print(f"Automatically determined batch size: {batch_size}")
 
     T, C, X, Y = image.shape
     F = T // 2 + 1
@@ -259,59 +341,3 @@ def query_fft_features(
         queried_features["frequencies"] = freqs[adjusted_argmaxes]
 
     return queried_features
-
-
-def extract_single_cell_data(
-    masks_dict,  # {'all': mask, 'thresholded': mask_th, ...}
-    queried_features,
-    mean_levels_image=None,
-):
-    """
-    Aggregate per-pixel FFT features into per-cell statistics using segmentation masks.
-
-    Parameters:
-    -----------
-    masks_dict : dict
-        Dictionary mapping mask variant names to 2D mask tensors.
-        Each mask tensor should have shape (X, Y) with integer label IDs.
-    queried_features : dict
-        Dictionary of per-pixel FFT features, typically from `query_fft_features`.
-    mean_levels_image : torch.Tensor or None
-        Optional per-pixel expression image (C, X, Y) to include in output.
-
-    Returns:
-    --------
-    results : dict
-        Dictionary keyed by mask name, each value is a dict of per-cell feature statistics.
-    """
-
-    # Get shape from first feature image in the dictioanry
-    C, X, Y = queried_features[list(queried_features.keys())[0]].shape
-
-    # Flatten X,Y
-    reshaped_features = {
-        key: val.reshape(C, X * Y) for key, val in queried_features.items()
-    }
-
-    if mean_levels_image is not None:
-        reshaped_mean_levels_image = mean_levels_image.reshape(C, X * Y)
-
-    def compute_stats(mask_flat, dim_size):
-        stats = {}
-        for key, val in reshaped_features.items():
-            stats[key] = scatter_mean(val, mask_flat, dim=-1, dim_size=dim_size)
-            stats[f"{key}_sd"] = scatter_std(val, mask_flat, dim=-1, dim_size=dim_size)
-
-        if mean_levels_image is not None:
-            stats["levels"] = scatter_mean(
-                reshaped_mean_levels_image, mask_flat, dim=-1, dim_size=dim_size
-            )
-        return stats
-
-    results = {}
-    num_labels = max(int(mask.max().item()) for mask in masks_dict.values()) + 1
-    for name, mask in masks_dict.items():
-        mask_flat = mask.reshape(X * Y)
-        results[name] = compute_stats(mask_flat, num_labels)
-
-    return results

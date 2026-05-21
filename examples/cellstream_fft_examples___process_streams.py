@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 
 import cellstream
 
+
 images_dir = "images"
 masks_dir = "masks"
 
@@ -19,7 +20,7 @@ data = cellstream.fft.process_folder_cellstreams(
     downsample_by=None,
     normalize_histogram=True,
     ###FFT methods
-    batch_size=100000,
+    batch_size='auto',
     device="cuda",
     ###FFT analysis parameters
     cutoff_frequency_bin=6,
@@ -37,11 +38,13 @@ data = cellstream.fft.process_folder_cellstreams(
 plt.scatter(
     data[
         "minD_queried_normalized_amplitude_mean___thresh_queried_normalized_amplitude_at_0.02"
-    ],
+        ],
     data[
         "minE_queried_normalized_amplitude_mean___thresh_queried_normalized_amplitude_at_0.02"
-    ],
-    c=data["minD_argmaxes_mean___thresh_queried_normalized_amplitude_at_0.02"],
+        ],
+    c=data[
+        "minD_argmaxes_mean___thresh_queried_normalized_amplitude_at_0.02"
+        ],
     cmap="turbo",
     vmin=6,
     vmax=26,
