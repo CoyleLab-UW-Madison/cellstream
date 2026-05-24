@@ -137,12 +137,7 @@ def process_image_cellstreams(
                     f"[warn] Feature '{queried_feature_key}' not found in queried_fft_features. Skipping threshold."
                 )
 
-    # if cutoff_power is not None:
-    #     carrier_amp = queried_fft_features['queried_norm_amplitudes'][carrier_index]
-    #     masks_th = (carrier_amp > cutoff_power).int() * masks.clone()
-    #     masks_dict['thresholded'] = masks_th.to(dtype=torch.int64)
-
-    print("Extracting single-cell data...")
+        print("Extracting single-cell data...")
     results = extract_single_cell_data(masks_dict, queried_fft_features, mean_image)
 
     print("making dataframe...")
@@ -173,7 +168,6 @@ def process_folder_cellstreams(images_directory, masks_directory, **kwargs):
 
     images = os.listdir(images_directory)
 
-    # Process the positive images
     data = []
     for image_filename in progressbar.progressbar(images):
         name, ext = image_filename.split(".")

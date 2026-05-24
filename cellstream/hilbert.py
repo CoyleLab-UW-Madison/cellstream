@@ -51,23 +51,7 @@ def _process_hilbert_batch(batch):
     Compute Hilbert transform on a batch (T, ...).
     """
     T = batch.shape[0]
-    # FFT along time axis
-    freqs = torch.fft.rfft(batch, axis=0)
-    # The Hilbert transform in frequency domain:
-    # H(f) = -j * sgn(f)
-    # For rfft, we have only positive frequencies.
-    # We want to create the analytic signal: A = Real + j*Imag
-    # Imag = IFT(-j * FT(Real))
-    
-    # Simple analytic signal via FFT: 
-    # 1. FT the real signal
-    # 2. Zero out negative frequencies (already done by rfft)
-    # 3. Double the positive frequencies (except DC and Nyquist)
-    # 4. IFT back
-    
-    # But here we just want the imaginary part to form the complex tensor?
-    # Or return the full analytic signal.
-    
+    freqs = torch.fft.rfft(batch, axis=0)  
     transforms = -1j * freqs
     transforms[0] = 0 # zero DC
     imaginary = torch.fft.irfft(transforms, n=T, axis=0)

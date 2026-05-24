@@ -23,9 +23,9 @@ from . import phase
 
 # Convenience re-exports for common functions
 from .io import load_image, load_masks, load_zarr, write_to_zarr
-from .utils import normalize_dims, downsample, normalize_histogram, convolve_along_timeseries
-from .analysis import extract_single_cell_data, create_dataframe, reshape_to_longform, map_data_onto_mask
-from .viz import color_by_axis, patch_napari_for_torch
+from .utils import normalize_dims, downsample, normalize_histogram, convolve_along_timeseries, corr_along_axis, hann_image_series
+from .analysis import extract_single_cell_data, create_dataframe, reshape_to_longform
+from .viz import color_by_axis, patch_napari_for_torch, map_data_onto_mask
 from .phase import winding_number
 
 __all__ = [
@@ -40,7 +40,6 @@ __all__ = [
     "filters",
     "registration",
     "phase",
-    "experimental",
     "load_image",
     "load_masks",
     "load_zarr",
@@ -49,6 +48,8 @@ __all__ = [
     "downsample",
     "normalize_histogram",
     "convolve_along_timeseries",
+    "corr_along_axis",
+    "hann_image_series",
     "extract_single_cell_data",
     "create_dataframe",
     "reshape_to_longform",

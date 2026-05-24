@@ -91,3 +91,48 @@ def convolve_along_timeseries(video_tensor, kernel_weights, batch_size=512):
     output = torch.cat(output_chunks, dim=0)
     # Reshape back to (T, C, H, W)
     return output.reshape(C, H, W, T).permute(3, 0, 1, 2)
+
+def corr_along_axis(series_a, series_b, window=10, step=1, normalize_histogram=True):
+    """
+    Compute sliding window Pearson correlation between two image timeseries.
+    Assumes (T, 1, H, W) shape.
+    """
+    if normalize_histogram:
+        series_a = normalize_histogram(series_a)
+        series_b = normalize_histogram(series_b)
+    
+    # Unfold into windows
+    a_unfold = series_a.unfold(0, window, step) # (num_windows, 1, H, W, window_size)
+    b_unfold = series_b.unfold(0, window, step)
+
+    # Center within windows
+    a_centered = a_unfold - a_unfold.mean(dim=-1, keepdim=True)
+    b_centered = b_unfold - b_unfold.mean(dim=-1, keepdim=True)
+    
+    # Pearson numerator
+    pearson_num = (a_centered * b_centered).sum(dim=-1)
+    
+    # Pearson denominator
+    a_var = torch.sum(a_centered**2, dim=-1)
+    b_var = torch.sum(b_centered**2, dim=-1)
+    pearson_denom = torch.sqrt(a_var * b_var)
+    
+    corr = pearson_num / (pearson_denom + 1e-8)
+    return corr
+
+def hann_image_series(img,norm_histogram=False):
+    """
+    Apply hanning window to image timeseries.
+    Assumes (T,C,H,W) tensor input.
+    """
+    
+    #for convenience
+    if norm_histogram==True:
+        img=normalize_histogram(img)
+        
+    T=img.shape[0]
+    hann=torch.hann_window(T)
+    hann_series=hann.view(T, 1, 1, 1)
+    hann_img=img*hann_series
+    
+    return hann_img

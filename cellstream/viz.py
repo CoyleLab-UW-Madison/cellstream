@@ -89,3 +89,18 @@ def patch_napari_for_torch():
     napari.view_shapes = _wrap_func(napari.view_shapes)
     
     print("Napari patched for Torch.")
+
+def map_data_onto_mask(mask, df, column):
+    """
+    Map values from a DataFrame column back onto a label mask.
+    """
+    if "cell_id" in df.columns:
+        df = df.set_index("cell_id")
+
+    cell_ids = df.index.to_numpy()
+    values = df[column].to_numpy()
+
+    lut = torch.zeros(int(mask.max().item()) + 1, dtype=torch.as_tensor(values).dtype)
+    lut[cell_ids] = torch.as_tensor(values)
+
+    return lut[mask]

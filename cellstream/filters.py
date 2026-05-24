@@ -19,6 +19,9 @@ def create_ir_filter(cutoff_freq, high_pass=False, window_size=101):
     except ImportError:
         raise ImportError("torchaudio is required for create_ir_filter.")
 
+    if not isinstance(cutoff_freq, torch.Tensor):
+            cutoff_freq = torch.as_tensor(cutoff_freq)
+        
     impulse_response = F_proto.sinc_impulse_response(cutoff_freq, window_size=window_size)
     
     if high_pass:

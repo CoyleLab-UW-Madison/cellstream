@@ -8,7 +8,6 @@ import pandas as pd
 import torch
 from torch_scatter import scatter_mean, scatter_std
 import re
-from .utils import normalize_histogram as norm_hist
 
 def extract_single_cell_data(masks_dict, feature_maps, mean_levels_image=None):
     """
@@ -94,46 +93,3 @@ def reshape_to_longform(df):
     long_df["mask_type"] = long_df["mask_type"].fillna("all")
 
     return long_df
-
-def map_data_onto_mask(mask, df, column):
-    """
-    Map values from a DataFrame column back onto a label mask.
-    """
-    if "cell_id" in df.columns:
-        df = df.set_index("cell_id")
-
-    cell_ids = df.index.to_numpy()
-    values = df[column].to_numpy()
-
-    lut = torch.zeros(int(mask.max().item()) + 1, dtype=torch.as_tensor(values).dtype)
-    lut[cell_ids] = torch.as_tensor(values)
-
-    return lut[mask]
-
-def corr_along_axis(series_a, series_b, window=10, step=1, normalize_histogram=True):
-    """
-    Compute sliding window Pearson correlation between two image timeseries.
-    Assumes (T, 1, H, W) shape.
-    """
-    if normalize_histogram:
-        series_a = norm_hist(series_a)
-        series_b = norm_hist(series_b)
-    
-    # Unfold into windows
-    a_unfold = series_a.unfold(0, window, step) # (num_windows, 1, H, W, window_size)
-    b_unfold = series_b.unfold(0, window, step)
-
-    # Center within windows
-    a_centered = a_unfold - a_unfold.mean(dim=-1, keepdim=True)
-    b_centered = b_unfold - b_unfold.mean(dim=-1, keepdim=True)
-    
-    # Pearson numerator
-    pearson_num = (a_centered * b_centered).sum(dim=-1)
-    
-    # Pearson denominator
-    a_var = torch.sum(a_centered**2, dim=-1)
-    b_var = torch.sum(b_centered**2, dim=-1)
-    pearson_denom = torch.sqrt(a_var * b_var)
-    
-    corr = pearson_num / (pearson_denom + 1e-8)
-    return corr

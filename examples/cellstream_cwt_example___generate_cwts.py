@@ -16,7 +16,7 @@ results = cellstream.cwt.generate_cwt_image_cellstreams(
     ###cwt parameters
     min_scale=80,
     max_scale=180,
-    num_filter_banks=20,
+    num_filter_banks=1,
     blocks='auto',
     use_gpu=True,
     bank_method="max_pool",
@@ -27,30 +27,8 @@ results = cellstream.cwt.generate_cwt_image_cellstreams(
     ###channel information
     channel_names=["MinE", "MinD"],
     carrier_channel=1,
-    channel_outputs={0: ["amp", "phase_difference"], 1: ["amp", "freq"]},
+    channel_outputs={0: ["amp", "phase_difference"], 1: ["amp", "phase"]},
     #channel_outputs={0: ["amp"], 1: ["amp"]},
     ##sampling parameters
     sampling={"fs": 2, "N": 361},
 )
-
-
-##napari visualization
-import napari
-import torch
-cellstream.image.patch_napari_for_torch()
-viewer = napari.Viewer()
-viewer.add_image(
-    results['MinD']['amp'].detach().numpy(),
-    name='my_volume',
-    rendering='mip',
-    scale=[20,1,1]
-    )  # rendering='mip', 'translucent', etc.
-
-
-# ##create 3d rock
-# outs=[]
-# for i in torch.linspace(-2.5,2.5,25):
-#     viewer.camera.angles = (0, i,90)
-#     out=viewer.screenshot(canvas_only=True)
-#     outs.append(torch.from_numpy(out))
-# outs=torch.stack(outs,dim=0)
