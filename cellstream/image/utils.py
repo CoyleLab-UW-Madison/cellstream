@@ -26,7 +26,10 @@ import functools
 
 import matplotlib.pyplot as plt
 import progressbar
+import numpy as np
 import torch
+
+from pystackreg import StackReg
 
 
 def downsample(tensor, scale, is_mask=False):
@@ -235,3 +238,51 @@ def patch_napari_for_torch():
     napari.view_labels = _wrap_add_func(napari.view_labels)
     napari.view_points = _wrap_add_func(napari.view_points)
     napari.view_shapes = _wrap_add_func(napari.view_shapes)
+
+
+def register_multichannel(
+    im, reference_channel=0, reference="previous", method="TRANSLATION", verbose=False
+):
+    """Use pystackreg to register a multichannel image to a transformation matrix defined from a single channel.
+
+    Args:
+        im: image as numpy array or pytorch tensor, usually loaded in from nd2 or tiffile
+        reference_channel: the channel to use for creating the image registration
+        reference: the frame to use as reference for image registration
+        method: pystackreg image registration method
+    """
+    # catch if the image comes from a pytorch tensor
+    from_tensor = False
+    if torch.is_tensor(im):
+        im = im.numpy()
+        from_tensor = True
+
+    # normalize dimensions to 4 to handle 3D and 4D images
+    im = normalize_dims(im, 1)
+
+    # pre-allocate matrix for registration
+    reg = np.zeros(im.shape)
+
+    # create registered transformation
+    reg_methods = dict(
+        {
+            "TRANSLATION": StackReg.TRANSLATION,
+            "RIGID_BODY": StackReg.RIGID_BODY,
+            "SCALED_ROTATION": StackReg.SCALED_ROTATION,
+            "AFFINE": StackReg.AFFINE,
+            "BILINEAR": StackReg.BILINEAR,
+        }
+    )
+    ref_im = im[:, reference_channel, :, :]
+    sr = StackReg(reg_methods[method])
+    tmat = sr.register_stack(ref_im, axis=0, reference=reference, verbose=verbose)
+
+    # transform multichannel using tmat
+    for i in range(reg.shape[1]):
+        reg[:, i, :, :] = sr.transform_stack(im[:, i, :, :], tmats=tmat)
+
+    # switch back to tensor if tensor was received
+    if from_tensor:
+        reg = torch.from_numpy(reg)
+
+    return reg
