@@ -7,9 +7,7 @@ Created on Mon Jun  1 21:54:44 2026
 
 import cellstream
 
-
-#img=cellstream.load_image("../raw_data/example_timeseries.nd2")
-img=cellstream.load_image("../napari-cellstream_repository/example_timeseries_mini_0.tif")
+img=cellstream.load_image("images/example_timeseries_mini_0.tif")
 
 #generate pixel features
 pixel_features=cellstream.experimental.pixel_profiler.profile_image_pixels(
