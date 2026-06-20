@@ -291,6 +291,7 @@ def generate_cwt_image_cellstreams(
     channel_names=None,
     channel_outputs={0: ["amp", "freq", "phase"]},
     sampling=None,
+    return_timeseries=False,
     **ssqueezepy_cwt_kwargs,
 ):
     """
@@ -298,6 +299,7 @@ def generate_cwt_image_cellstreams(
     Args:
         img: Input array (T, X, Y)
         outputs:
+        return_timeseries: If True, adds the preprocessed timeseries to the results dictionary.
         **kwargs: Forwarded to ssqueezepy.cwt
     Returns:
         Dictionary of requested outputs as numpy arrays
@@ -332,6 +334,7 @@ def generate_cwt_image_cellstreams(
             )
             print(f"Automatically determined block size: {blocks}")
 
+    preprocessed_timeseries = img
     # reshape image for blocked processing
     T, C, X, Y = img.shape
     img = img.reshape(T, C, X * Y).permute(2, 1, 0)  # shape is now (x*y,c,t)
@@ -387,6 +390,9 @@ def generate_cwt_image_cellstreams(
     else:
         result = final
 
+    if return_timeseries:
+        result["timeseries"] = preprocessed_timeseries
+
     attrs = {
         "min_scale": min_scale,
         "max_scale": max_scale,
@@ -402,6 +408,7 @@ def generate_cwt_image_cellstreams(
         "channel_names": channel_names,
         "channel_outputs": channel_outputs,
         "sampling": sampling,
+        "return_timeseries": return_timeseries,
     }
     for k, v in ssqueezepy_cwt_kwargs.items():
         attrs[k] = v

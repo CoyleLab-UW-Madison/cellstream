@@ -27,7 +27,7 @@ import warnings
 import progressbar
 import torch
 
-from ..utils import normalize_dims, normalize_histogram as norm_hist
+from ..utils import normalize_dims, normalize_histogram as norm_hist, downsample
 from ..analysis import extract_single_cell_data
 
 
@@ -116,6 +116,8 @@ def generate_fft_features(
         "z_score",
         "phase",
     ],
+    downsample_by=None,
+    return_timeseries=False,
     **kwargs,
 ):
     """
@@ -140,6 +142,10 @@ def generate_fft_features(
         - 'normalized_amplitude'
         - 'z_score'
         - 'phase'
+    downsample_by : float or None
+        If set, spatially downsamples the input image by this scale factor.
+    return_timeseries : bool
+        If True, adds the preprocessed timeseries to the results dictionary.
     Returns:
     --------
     feature_map : dict
@@ -147,6 +153,10 @@ def generate_fft_features(
     """
 
     image = normalize_dims(image, 1)
+
+    if downsample_by is not None:
+        print(f"Downsampling image by {downsample_by} ...")
+        image = downsample(image, downsample_by)
 
     if batch_size == "auto":
             batch_size = _infer_batch_size(
@@ -164,6 +174,8 @@ def generate_fft_features(
         max_bin = F
     if normalize_histogram:
         image = norm_hist(image)
+
+    preprocessed_timeseries = image
 
     mean_image = image.mean(axis=0)
     centered_image = image - mean_image
@@ -231,12 +243,17 @@ def generate_fft_features(
             phase = fft.angle()
             feature_map["phase"] = phase[:max_bin]
 
+    if return_timeseries:
+        feature_map["timeseries"] = preprocessed_timeseries
+
     attrs = {
         "normalize_histogram": normalize_histogram,
         "max_bin": max_bin,
         "batch_size": batch_size,
         "device": device,
         "fft_features_to_process": fft_features_to_process,
+        "downsample_by": downsample_by,
+        "return_timeseries": return_timeseries,
     }
     for k, v in kwargs.items():
         attrs[k] = v

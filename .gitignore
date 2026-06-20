@@ -4,3 +4,5 @@ examples/raw
 __pycache__/
 *.pyc
 *.zarr
+.*
+!.gitignore
