@@ -27,7 +27,7 @@ results = cellstream.cwt.generate_cwt_image_cellstreams(
     ###channel information
     channel_names=["MinE", "MinD"],
     carrier_channel=1,
-    channel_outputs={0: ["amp", "phase_difference"], 1: ["amp", "phase"]},
+    channel_outputs={0: ["amp", "phase_difference"], 1: ["amp", "freq"]},
     #channel_outputs={0: ["amp"], 1: ["amp"]},
     ##sampling parameters
     sampling={"fs": 2, "N": 361},

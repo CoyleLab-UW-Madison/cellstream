@@ -9,9 +9,16 @@ from .utils import (
     generate_cwt_image_cellstreams,
     extract_cwt_cellstreams,
 )
+from .process import (
+    process_cwt_image_cellstreams,
+    process_folder_cwt_cellstreams,
+)
 
 __all__ = [
     "query_cwt_block",
     "generate_cwt_image_cellstreams",
     "extract_cwt_cellstreams",
+    "process_cwt_image_cellstreams",
+    "process_folder_cwt_cellstreams",
 ]
+

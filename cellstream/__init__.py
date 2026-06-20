@@ -20,6 +20,7 @@ from . import hilbert
 from . import filters
 from . import registration
 from . import phase
+from . import experimental
 
 # Convenience re-exports for common functions
 from .io import load_image, load_masks, load_zarr, write_to_zarr
@@ -40,6 +41,7 @@ __all__ = [
     "filters",
     "registration",
     "phase",
+    "experimental",
     "load_image",
     "load_masks",
     "load_zarr",

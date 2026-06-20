@@ -11,21 +11,48 @@ import torch
 import zarr
 
 class TorchZarrStore:
-    """Wrapper around Zarr group to return Torch tensors."""
-    def __init__(self, path):
-        self._z = zarr.open(str(path), mode="r")
+    """Wrapper around Zarr group or array to return Torch tensors."""
+    def __init__(self, path_or_zarr):
+        if isinstance(path_or_zarr, (zarr.hierarchy.Group, zarr.core.Array)):
+            self._z = path_or_zarr
+        else:
+            self._z = zarr.open(str(path_or_zarr), mode="r")
 
-    @property
     def keys(self):
-        return list(self._z.array_keys())
+        """Returns the keys available in the Zarr store."""
+        if isinstance(self._z, zarr.hierarchy.Group):
+            return list(self._z.array_keys()) + list(self._z.group_keys())
+        # For a bare array, we return a virtual key 'data'
+        return ["data"]
+
+    def __iter__(self):
+        return iter(self.keys())
+
+    def __len__(self):
+        return len(self.keys())
+
+    def __contains__(self, key):
+        return key in self.keys()
 
     def __repr__(self):
-        return f"TorchZarrStore(keys={self.keys})"
+        if isinstance(self._z, zarr.hierarchy.Group):
+            return f"TorchZarrStore(keys={self.keys()})"
+        else:
+            return f"TorchZarrStore(shape={self._z.shape}, dtype={str(self._z.dtype)})"
 
     def __getitem__(self, key):
-        if key not in self._z:
-            raise KeyError(f"Tensor '{key}' not found. Available: {self.keys}")
-        return torch.from_numpy(self._z[key][:])
+        if isinstance(self._z, zarr.hierarchy.Group):
+            if key not in self._z:
+                raise KeyError(f"Key '{key}' not found. Available keys: {self.keys()}")
+            item = self._z[key]
+            if isinstance(item, zarr.hierarchy.Group):
+                return TorchZarrStore(item)
+            return torch.from_numpy(item[:])
+        else:
+            # If it's a bare array and we get a string key, return the whole array
+            if isinstance(key, str):
+                return torch.from_numpy(self._z[:])
+            return torch.as_tensor(self._z[key])
 
 def load_zarr(path):
     """Open a Zarr store as a TorchZarrStore."""
@@ -34,9 +61,10 @@ def load_zarr(path):
 def load_image(filename):
     """Load image from .tif or .nd2 and return as (T, C, X, Y) Torch tensor."""
     filename = str(filename)
-    if filename.endswith(".nd2"):
+    filename_lower = filename.lower()
+    if filename_lower.endswith(".nd2"):
         data = nd2.imread(filename)
-    elif filename.endswith((".tif", ".tiff")):
+    elif filename_lower.endswith((".tif", ".tiff")):
         data = tifffile.imread(filename)
     else:
         raise ValueError(f"Unsupported file format: {filename}")
@@ -53,14 +81,16 @@ def load_image(filename):
 def load_masks(filename):
     """Load masks from .tif or .nd2 and return as Torch tensor."""
     filename = str(filename)
-    if filename.endswith(".nd2"):
+    filename_lower = filename.lower()
+    if filename_lower.endswith(".nd2"):
         data = nd2.imread(filename)
-    elif filename.endswith((".tif", ".tiff")):
+    elif filename_lower.endswith((".tif", ".tiff")):
         data = tifffile.imread(filename)
     else:
         raise ValueError(f"Unsupported file format: {filename}")
         
     return torch.from_numpy(data.astype("int64"))
+
 
 def write_to_zarr(data, path, chunks=True, compressor="default"):
     """

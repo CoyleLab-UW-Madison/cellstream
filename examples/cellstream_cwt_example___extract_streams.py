@@ -73,3 +73,5 @@ phase_signaling_cellstreams, _ = cellstream.cwt.extract_cwt_cellstreams(
 # visualize example cell (#6) PKA and PKC activity
 plt.plot(amp_signaling_cellstreams[6][1])
 plt.plot(amp_signaling_cellstreams[6][2])
+plt.show()
+

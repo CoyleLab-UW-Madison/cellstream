@@ -166,19 +166,30 @@ def process_folder_cellstreams(images_directory, masks_directory, **kwargs):
         Combined DataFrame of all per-cell results from the folder.
     """
 
-    images = os.listdir(images_directory)
+    images = sorted(os.listdir(images_directory))
 
     data = []
     for image_filename in progressbar.progressbar(images):
-        name, ext = image_filename.split(".")
+        name, ext = os.path.splitext(image_filename)
+        ext = ext.lower().lstrip(".")
 
-        if ext in ["nd2", "tif"]:
+        if ext in ["nd2", "tif", "tiff"]:
             masks_filename = f"{name}_masks.tif"
             image_path = os.path.join(images_directory, image_filename)
             mask_path = os.path.join(masks_directory, masks_filename)
+            
+            if not os.path.exists(mask_path):
+                masks_filename_alt = f"{name}_masks.tiff"
+                mask_path_alt = os.path.join(masks_directory, masks_filename_alt)
+                if os.path.exists(mask_path_alt):
+                    mask_path = mask_path_alt
+                    masks_filename = masks_filename_alt
 
-            print(f"Processing: {image_path} with {mask_path}")
-            print("Loading images...")
+            if not os.path.exists(mask_path):
+                print(f"[warn] Mask file not found: {mask_path}. Skipping.")
+                continue
+
+            print(f"Processing FFT: {image_path} with {mask_path}")
             image = load_image(image_path)
             masks = load_masks(mask_path)
 
@@ -193,6 +204,9 @@ def process_folder_cellstreams(images_directory, masks_directory, **kwargs):
                 data.append(pos_data_for_image)
 
             except Exception as e:
-                print(f"Error processing {image}: {e}")
+                print(f"Error processing {image_filename}: {e}")
+    if not data:
+        return pd.DataFrame()
     data = pd.concat(data, ignore_index=True)
     return data
+

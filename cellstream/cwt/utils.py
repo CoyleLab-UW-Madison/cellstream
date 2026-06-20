@@ -223,11 +223,18 @@ def _infer_blocks(
             warnings.warn("PyTorch not found, falling back to default block size of 10.")
             return 10
     else:
-        # For CPU, let's just use a default for now.
-        warnings.warn(
-            "Automatic block size for CPU is not yet implemented, falling back to default block size of 10."
-        )
-        return 10
+        try:
+            import psutil
+            available_mem = psutil.virtual_memory().available
+            mem_to_use = available_mem * buffer_fraction
+        except ImportError:
+            warnings.warn(
+                "psutil not found. Cannot infer block size for CPU. "
+                "Please install psutil (`pip install psutil`) for this feature, "
+                "or specify `blocks` manually. Falling back to default block size of 10."
+            )
+            return 10
+
 
     os.environ["SSQ_GPU"] = "1" if use_gpu else "0"
     try:
