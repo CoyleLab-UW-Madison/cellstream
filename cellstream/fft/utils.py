@@ -231,6 +231,17 @@ def generate_fft_features(
             phase = fft.angle()
             feature_map["phase"] = phase[:max_bin]
 
+    attrs = {
+        "normalize_histogram": normalize_histogram,
+        "max_bin": max_bin,
+        "batch_size": batch_size,
+        "device": device,
+        "fft_features_to_process": fft_features_to_process,
+    }
+    for k, v in kwargs.items():
+        attrs[k] = v
+
+    feature_map["_attrs"] = attrs
     return feature_map
 
 

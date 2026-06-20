@@ -18,12 +18,22 @@ class TorchZarrStore:
         else:
             self._z = zarr.open(str(path_or_zarr), mode="r")
 
+    @property
+    def attrs(self):
+        """Returns the attributes of the Zarr store."""
+        return dict(self._z.attrs)
+
     def keys(self):
         """Returns the keys available in the Zarr store."""
         if isinstance(self._z, zarr.hierarchy.Group):
-            return list(self._z.array_keys()) + list(self._z.group_keys())
-        # For a bare array, we return a virtual key 'data'
-        return ["data"]
+            base_keys = list(self._z.array_keys()) + list(self._z.group_keys())
+        else:
+            # For a bare array, we return a virtual key 'data'
+            base_keys = ["data"]
+        
+        if len(self._z.attrs) > 0:
+            base_keys.append("_attrs")
+        return base_keys
 
     def __iter__(self):
         return iter(self.keys())
@@ -41,6 +51,9 @@ class TorchZarrStore:
             return f"TorchZarrStore(shape={self._z.shape}, dtype={str(self._z.dtype)})"
 
     def __getitem__(self, key):
+        if key == "_attrs" and len(self._z.attrs) > 0:
+            return dict(self._z.attrs)
+
         if isinstance(self._z, zarr.hierarchy.Group):
             if key not in self._z:
                 raise KeyError(f"Key '{key}' not found. Available keys: {self.keys()}")
@@ -112,9 +125,29 @@ def write_to_zarr(data, path, chunks=True, compressor="default"):
     else:
         raise TypeError(f"Unsupported data type for write_to_zarr: {type(data)}")
 
+def _sanitize_metadata(val):
+    """Recursively convert values to JSON-serializable types for Zarr attributes."""
+    if isinstance(val, dict):
+        return {str(k): _sanitize_metadata(v) for k, v in val.items()}
+    elif isinstance(val, (list, tuple)):
+        return [_sanitize_metadata(item) for item in val]
+    elif isinstance(val, (int, float, str, bool)) or val is None:
+        return val
+    else:
+        return str(val)
+
 def _write_dict_to_zarr_group(group, d, chunks=True, compressor=None):
     """Recursively write a dictionary to a Zarr group."""
+    if "_attrs" in d and isinstance(d["_attrs"], dict):
+        for meta_k, meta_v in d["_attrs"].items():
+            try:
+                group.attrs[str(meta_k)] = _sanitize_metadata(meta_v)
+            except Exception as e:
+                print(f"Warning: Could not save attribute {meta_k} to Zarr: {e}")
+
     for k, v in d.items():
+        if k == "_attrs":
+            continue
         key = str(k)
         if isinstance(v, dict):
             subgroup = group.create_group(key)

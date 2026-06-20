@@ -383,9 +383,31 @@ def generate_cwt_image_cellstreams(
 
     # adjust to match channel names if need be
     if channel_names is not None:
-        return {channel_names[idx]: outdict for idx, outdict in final.items()}
+        result = {channel_names[idx]: outdict for idx, outdict in final.items()}
     else:
-        return final
+        result = final
+
+    attrs = {
+        "min_scale": min_scale,
+        "max_scale": max_scale,
+        "num_filter_banks": num_filter_banks,
+        "normalize_amplitudes": normalize_amplitudes,
+        "blocks": blocks,
+        "use_gpu": use_gpu,
+        "bank_method": bank_method,
+        "downsample_by": downsample_by,
+        "normalize_histogram": normalize_histogram,
+        "mean_center": mean_center,
+        "carrier_channel": carrier_channel,
+        "channel_names": channel_names,
+        "channel_outputs": channel_outputs,
+        "sampling": sampling,
+    }
+    for k, v in ssqueezepy_cwt_kwargs.items():
+        attrs[k] = v
+
+    result["_attrs"] = attrs
+    return result
 
 
 def extract_cwt_cellstreams(features, track_masks):

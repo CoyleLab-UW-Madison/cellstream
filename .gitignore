@@ -3,3 +3,4 @@ examples/raw
 *.egg-info/
 __pycache__/
 *.pyc
+*.zarr
