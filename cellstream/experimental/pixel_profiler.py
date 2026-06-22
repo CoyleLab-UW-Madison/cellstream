@@ -80,6 +80,14 @@ def profile_image_pixels(
     pd.DataFrame
         A DataFrame containing the profiled pixel data.
     """
+
+    #gather metadata
+    run_metadata = locals().copy()
+    if hasattr(img, 'shape'):
+        run_metadata['img'] = f"Tensor/Array(shape={list(img.shape)})"
+    else:
+        run_metadata['img'] = "Unknown Image Format"
+
     # Ensure image is torch.Tensor
     if not isinstance(img, torch.Tensor):
         img = torch.tensor(img)
@@ -193,8 +201,12 @@ def profile_image_pixels(
         data_dict[f'{name}_amp'] = amp_val[mask_indices].cpu().numpy()
         data_dict[f'{name}_norm_amp'] = norm_amp_val[mask_indices].cpu().numpy()
         data_dict[f'{name}_z'] = z_val[mask_indices].cpu().numpy()
-        
-    return pd.DataFrame(data_dict)
+    
+    #package results for return
+    result=pd.DataFrame(data_dict)
+    result.attrs = run_metadata
+
+    return result
 
 
 def batch_profile_pixels(
@@ -218,7 +230,8 @@ def batch_profile_pixels(
     
     Parameters
     ----------
-    file_paths : list of str/Path
+    file_paths : str OR list of strings/Paths
+        Either a string corresponding to a directory to process OR 
         List of paths to images to process.
     register_images : bool
         Whether to register and transform the image timeseries before profiling. Default is True.
@@ -233,6 +246,11 @@ def batch_profile_pixels(
     pd.DataFrame
         Aggregated DataFrame with all profiled pixels.
     """
+    
+    #store params for metadata
+    run_metadata = locals().copy()
+
+    #for holding the dataframes
     all_data_frames = []
     
     # Attempt to set up a progress bar
@@ -244,6 +262,12 @@ def batch_profile_pixels(
             progressbar_available = True
         except ImportError:
             pass
+    
+    if isinstance(file_paths, str):
+        print(f"Converting {file_paths} to list of paths...")
+        file_paths = [path for path in Path(file_paths).iterdir() if path.is_file()]
+    
+ 
 
     for i, fp in enumerate(file_paths):
         fp_path = Path(fp)
@@ -285,12 +309,19 @@ def batch_profile_pixels(
     if show_progress and progressbar_available:
         bar.finish()
 
+    #bundle data
     if all_data_frames:
         if show_progress:
             print("Consolidating all data...")
-        return pd.concat(all_data_frames, ignore_index=True)
+            result = pd.concat(all_data_frames, ignore_index=True)
     else:
-        return pd.DataFrame()
+        result = pd.DataFrame()
+
+    #add metadata
+    result.attrs=run_metadata
+
+    return result
+
 
 
 def project_pixels(df, z_col, shape=None, fill_value=float('nan'), filename=None):
