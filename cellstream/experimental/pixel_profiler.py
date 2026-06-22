@@ -13,6 +13,7 @@ import pandas as pd
 import torch
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+
 from pathlib import Path
 from scipy.stats import binned_statistic_2d
 
@@ -588,7 +589,7 @@ def plot_2d_landscape(
     return fig, ax
 
 
-def save_stats(data, filename="landscape_stats.pbz2"):
+def save_landscape(data, filename="landscape_stats.pbz2"):
     """Compresses and saves statistic dict to a .pbz2 file."""
     print(f"Compressing and saving to {filename}...")
     with bz2.BZ2File(filename, "w") as f:
@@ -596,7 +597,7 @@ def save_stats(data, filename="landscape_stats.pbz2"):
     print(f"Done. File size: {os.path.getsize(filename) / 1024**2:.2f} MB")
 
 
-def load_stats(filename="landscape_stats.pbz2"):
+def load_landscape(filename="landscape_stats.pbz2"):
     """Loads statistic dict from a compressed .pbz2 file."""
     print(f"Loading {filename}...")
     with bz2.BZ2File(filename, "rb") as f:

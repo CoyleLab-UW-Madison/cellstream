@@ -12,8 +12,8 @@ from .pixel_profiler import (
     project_pixels,
     compute_2d_landscape,
     plot_2d_landscape,
-    save_stats,
-    load_stats,
+    save_landscape,
+    load_landscape,
 )
 
 __all__ = [
@@ -23,6 +23,6 @@ __all__ = [
     "project_pixels",
     "compute_2d_landscape",
     "plot_2d_landscape",
-    "save_stats",
-    "load_stats",
+    "save_landscape",
+    "load_landscape",
 ]
