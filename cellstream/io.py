@@ -10,13 +10,20 @@ import tifffile
 import torch
 import zarr
 
+import torch
+import zarr
+import numpy as np
+
 class TorchZarrStore:
-    """Wrapper around Zarr group or array to return Torch tensors."""
+    """Wrapper around Zarr group or array (v2 or v3) to return Torch tensors."""
     def __init__(self, path_or_zarr):
-        if isinstance(path_or_zarr, (zarr.hierarchy.Group, zarr.core.Array)):
+        if hasattr(path_or_zarr, "attrs"):
             self._z = path_or_zarr
         else:
             self._z = zarr.open(str(path_or_zarr), mode="r")
+            
+        # Determine if this instance is an Array or a Group
+        self._is_array = hasattr(self._z, "shape")
 
     @property
     def attrs(self):
@@ -25,8 +32,9 @@ class TorchZarrStore:
 
     def keys(self):
         """Returns the keys available in the Zarr store."""
-        if isinstance(self._z, zarr.hierarchy.Group):
-            base_keys = list(self._z.array_keys()) + list(self._z.group_keys())
+        if not self._is_array:
+           
+            base_keys = list(self._z.keys())
         else:
             # For a bare array, we return a virtual key 'data'
             base_keys = ["data"]
@@ -45,7 +53,7 @@ class TorchZarrStore:
         return key in self.keys()
 
     def __repr__(self):
-        if isinstance(self._z, zarr.hierarchy.Group):
+        if not self._is_array:
             return f"TorchZarrStore(keys={self.keys()})"
         else:
             return f"TorchZarrStore(shape={self._z.shape}, dtype={str(self._z.dtype)})"
@@ -54,22 +62,28 @@ class TorchZarrStore:
         if key == "_attrs" and len(self._z.attrs) > 0:
             return dict(self._z.attrs)
 
-        if isinstance(self._z, zarr.hierarchy.Group):
+        if not self._is_array:
             if key not in self._z:
                 raise KeyError(f"Key '{key}' not found. Available keys: {self.keys()}")
+            
             item = self._z[key]
-            if isinstance(item, zarr.hierarchy.Group):
+            # If the retrieved item doesn't have a shape, it's a sub-group
+            if not hasattr(item, "shape"):
                 return TorchZarrStore(item)
-            return torch.from_numpy(item[:])
+            
+            
+            return torch.from_numpy(np.asarray(item[:]))
         else:
             # If it's a bare array and we get a string key, return the whole array
             if isinstance(key, str):
-                return torch.from_numpy(self._z[:])
-            return torch.as_tensor(self._z[key])
+                return torch.from_numpy(np.asarray(self._z[:]))
+            
+            return torch.as_tensor(np.asarray(self._z[key]))
 
 def load_zarr(path):
     """Open a Zarr store as a TorchZarrStore."""
     return TorchZarrStore(path)
+
 
 def load_image(filename):
     """Load image from .tif or .nd2 and return as (T, C, X, Y) Torch tensor."""
@@ -107,23 +121,35 @@ def load_masks(filename):
 
 def write_to_zarr(data, path, chunks=True, compressor="default"):
     """
-    Write a tensor, array, or dictionary of such to a Zarr store.
+    Write a tensor, array, or dictionary of such to a Zarr store (Supports v2 and v3).
     """
-    if compressor == "default":
-        compressor = zarr.Blosc(cname="zstd", clevel=5, shuffle=zarr.Blosc.BITSHUFFLE)
+    # 1. Check the major version of Zarr explicitly
+    is_v3 = zarr.__version__.startswith("3.")
 
+    if compressor == "default":
+        if is_v3:
+            # Zarr v3 configuration dictionary
+            compressor = {"name": "zstd", "level": 5}
+        else:
+            # Legacy Zarr v2 Blosc object
+            compressor = zarr.Blosc(cname="zstd", clevel=5, shuffle=zarr.Blosc.BITSHUFFLE)
+
+    # 2. Base case: single Array/Tensor
     if isinstance(data, (torch.Tensor, np.ndarray)):
         if isinstance(data, torch.Tensor):
             data = data.detach().cpu().numpy()
-        z = zarr.open(path, mode="w", shape=data.shape, dtype=data.dtype, 
+        
+        z = zarr.open(str(path), mode="w", shape=data.shape, dtype=data.dtype, 
                       chunks=chunks, compressor=compressor)
         z[:] = data
+
+    # 3. Recursive case: Dictionaries
     elif isinstance(data, dict):
-        store = zarr.DirectoryStore(path)
-        root = zarr.group(store=store, overwrite=True)
+        root = zarr.open_group(str(path), mode="w")
         _write_dict_to_zarr_group(root, data, chunks=chunks, compressor=compressor)
     else:
         raise TypeError(f"Unsupported data type for write_to_zarr: {type(data)}")
+
 
 def _sanitize_metadata(val):
     """Recursively convert values to JSON-serializable types for Zarr attributes."""
@@ -136,8 +162,9 @@ def _sanitize_metadata(val):
     else:
         return str(val)
 
+
 def _write_dict_to_zarr_group(group, d, chunks=True, compressor=None):
-    """Recursively write a dictionary to a Zarr group."""
+    """Recursively write a dictionary to a Zarr group (v2 and v3 compatible)."""
     if "_attrs" in d and isinstance(d["_attrs"], dict):
         for meta_k, meta_v in d["_attrs"].items():
             try:
@@ -149,18 +176,21 @@ def _write_dict_to_zarr_group(group, d, chunks=True, compressor=None):
         if k == "_attrs":
             continue
         key = str(k)
+        
         if isinstance(v, dict):
             subgroup = group.create_group(key)
             _write_dict_to_zarr_group(subgroup, v, chunks=chunks, compressor=compressor)
-        elif isinstance(v, (torch.Tensor, np.ndarray)):
+        else:
             if isinstance(v, torch.Tensor):
                 v = v.detach().cpu().numpy()
-            group.array(key, v, chunks=chunks, compressor=compressor)
-        elif isinstance(v, (int, float, str, list, tuple)):
-            group.attrs[key] = v
-        else:
-            try:
-                arr = np.array(v)
-                group.array(key, arr, chunks=chunks, compressor=compressor)
-            except Exception:
-                print(f"Warning: Could not save key {key} of type {type(v)} to Zarr.")
+            elif not isinstance(v, np.ndarray):
+                v = np.asarray(v)
+                
+            # Safely navigate v2 vs v3 dataset creation methods
+            if hasattr(group, "create_array"):
+                arr = group.create_array(name=key, shape=v.shape, dtype=v.dtype, 
+                                         chunks=chunks, compressor=compressor, overwrite=True)
+            else:
+                arr = group.create_dataset(name=key, shape=v.shape, dtype=v.dtype, 
+                                           chunks=chunks, compressor=compressor, overwrite=True)
+            arr[:] = v

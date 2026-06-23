@@ -1,10 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Tue May 19 23:53:58 2026
-
-@author: scoyl
-"""
-
 import cellstream
 
 img=cellstream.image.load_image("images/example_timeseries_mini_0.tif")

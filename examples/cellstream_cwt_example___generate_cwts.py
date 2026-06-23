@@ -1,9 +1,3 @@
-"""
-Created on Wed Jul 23 12:41:33 2025
-
-@author: smcoyle
-"""
-
 import cellstream
 
 timeseries_image = cellstream.image.load_image("images/example_timeseries_mini_0.tif")
