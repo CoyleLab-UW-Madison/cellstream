@@ -1,6 +1,4 @@
-# Include only what you want
 include README.md
 recursive-include cellstream *.py
 
-# Exclude examples entirely:
 prune examples

@@ -123,7 +123,6 @@ def write_to_zarr(data, path, chunks=True, compressor="default"):
     """
     Write a tensor, array, or dictionary of such to a Zarr store (Supports v2 and v3).
     """
-    # 1. Check the major version of Zarr explicitly
     is_v3 = zarr.__version__.startswith("3.")
 
     if compressor == "default":
@@ -134,7 +133,7 @@ def write_to_zarr(data, path, chunks=True, compressor="default"):
             # Legacy Zarr v2 Blosc object
             compressor = zarr.Blosc(cname="zstd", clevel=5, shuffle=zarr.Blosc.BITSHUFFLE)
 
-    # 2. Base case: single Array/Tensor
+    #Base case: single Array/Tensor
     if isinstance(data, (torch.Tensor, np.ndarray)):
         if isinstance(data, torch.Tensor):
             data = data.detach().cpu().numpy()
@@ -143,7 +142,7 @@ def write_to_zarr(data, path, chunks=True, compressor="default"):
                       chunks=chunks, compressor=compressor)
         z[:] = data
 
-    # 3. Recursive case: Dictionaries
+    # Recursive case: Dictionaries
     elif isinstance(data, dict):
         root = zarr.open_group(str(path), mode="w")
         _write_dict_to_zarr_group(root, data, chunks=chunks, compressor=compressor)
@@ -186,7 +185,6 @@ def _write_dict_to_zarr_group(group, d, chunks=True, compressor=None):
             elif not isinstance(v, np.ndarray):
                 v = np.asarray(v)
                 
-            # Safely navigate v2 vs v3 dataset creation methods
             if hasattr(group, "create_array"):
                 arr = group.create_array(name=key, shape=v.shape, dtype=v.dtype, 
                                          chunks=chunks, compressor=compressor, overwrite=True)

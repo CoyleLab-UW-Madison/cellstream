@@ -8,10 +8,15 @@ Fast image analysis tools for digital signal processing of single-cell data stre
 
 ## Key Features
 
-- Fast FFT / CWT / filter-bank transforms of large image stacks
-- Optimized methods for downsampling, along-axis convolution, and memory-efficient filtering
+- Fast FFT / CWT / Hilbert / and filter-bank transforms of large image stacks
+- Optimized image processing methods for
+  - frequency/temporal re-coloring
+  - downsampling, along-axis convolution
+  - multi-channel image registration (requires [pystackreg](https://github.com/glichtner/pystackreg))
+  - phase-field defect detection and analysis
 - Fast multi-channel query tools for dynamic reporters that are coupled to carrier signals
 - Efficient per-cell extraction and summarization of dynamic datastreams
+- Zarr-based results management
 
 ---
 
