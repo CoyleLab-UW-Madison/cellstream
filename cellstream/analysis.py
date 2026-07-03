@@ -6,13 +6,19 @@ Tools for aggregating per-pixel data into single-cell statistics and dataframes.
 
 import pandas as pd
 import torch
-from torch_scatter import scatter_mean, scatter_std
 import re
 
 def extract_single_cell_data(masks_dict, feature_maps, mean_levels_image=None):
     """
     Aggregate per-pixel features into per-cell statistics using segmentation masks.
     """
+    try:
+        from torch_scatter import scatter_mean, scatter_std
+    except ImportError:
+        raise ImportError(
+            "torch-scatter is required for single-cell extraction. "
+            "Install it following: https://github.com/rusty1s/pytorch_scatter"
+        )
     # Get spatial dimensions from first feature
     first_feat = feature_maps[list(feature_maps.keys())[0]]
     if first_feat.dim() == 4: # (F, C, X, Y)

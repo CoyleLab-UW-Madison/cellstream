@@ -27,8 +27,10 @@ Functions:
 
 """
 
+import logging
+logger = logging.getLogger(__name__)
 import os
-import progressbar
+from tqdm.auto import tqdm
 import torch
 import pandas as pd
 
@@ -109,10 +111,10 @@ def process_image_cellstreams(
 
     mean_image = image.mean(axis=0)
 
-    print("Generating FFT features...")
+    logger.info("Generating FFT features...")
     fft_features = generate_fft_features(image, **kwargs)
 
-    print(f"Querying FFT features using channel {carrier_index} as carrier...")
+    logger.info(f"Querying FFT features using channel {carrier_index} as carrier...")
     queried_fft_features = query_fft_features(
         fft_features, cutoff_frequency_bin, carrier_index, **kwargs
     )
@@ -133,14 +135,12 @@ def process_image_cellstreams(
                     dtype=torch.int64
                 )
             else:
-                print(
-                    f"[warn] Feature '{queried_feature_key}' not found in queried_fft_features. Skipping threshold."
-                )
+                logger.warning(f" Feature '{queried_feature_key}' not found in queried_fft_features. Skipping threshold.")
 
-        print("Extracting single-cell data...")
+        logger.info("Extracting single-cell data...")
     results = extract_single_cell_data(masks_dict, queried_fft_features, mean_image)
 
-    print("making dataframe...")
+    logger.info("making dataframe...")
     df = create_dataframe(results, channel_names, image_filename, masks_filename)
 
     return (df, fft_features) if return_fft_features else df
@@ -169,7 +169,7 @@ def process_folder_cellstreams(images_directory, masks_directory, **kwargs):
     images = sorted(os.listdir(images_directory))
 
     data = []
-    for image_filename in progressbar.progressbar(images):
+    for image_filename in tqdm(images):
         name, ext = os.path.splitext(image_filename)
         ext = ext.lower().lstrip(".")
 
@@ -186,10 +186,10 @@ def process_folder_cellstreams(images_directory, masks_directory, **kwargs):
                     masks_filename = masks_filename_alt
 
             if not os.path.exists(mask_path):
-                print(f"[warn] Mask file not found: {mask_path}. Skipping.")
+                logger.warning(f" Mask file not found: {mask_path}. Skipping.")
                 continue
 
-            print(f"Processing FFT: {image_path} with {mask_path}")
+            logger.info(f"Processing FFT: {image_path} with {mask_path}")
             image = load_image(image_path)
             masks = load_masks(mask_path)
 
@@ -204,7 +204,7 @@ def process_folder_cellstreams(images_directory, masks_directory, **kwargs):
                 data.append(pos_data_for_image)
 
             except Exception as e:
-                print(f"Error processing {image_filename}: {e}")
+                logger.error(f"Error processing {image_filename}: {e}")
     if not data:
         return pd.DataFrame()
     data = pd.concat(data, ignore_index=True)

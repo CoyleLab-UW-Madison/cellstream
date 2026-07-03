@@ -21,13 +21,13 @@ Functions:
 
 """
 
+import logging
+logger = logging.getLogger(__name__)
 import os
 import warnings
 import numpy as np
-import progressbar
+from tqdm.auto import tqdm
 import torch
-
-from torch_scatter import scatter_mean, scatter_std
 
 from ..utils import downsample, normalize_dims, normalize_histogram as norm_hist
 from ..analysis import extract_single_cell_data
@@ -40,7 +40,7 @@ def query_cwt_block(
     num_filter_banks=1,
     normalize_amplitudes=False,
     carrier_channel=0,
-    channel_outputs={0: ["amp", "freq", "phase"]},
+    channel_outputs=None,
     use_gpu=False,
     bank_method="max_pool",
     sampling=None,
@@ -62,6 +62,9 @@ def query_cwt_block(
     # Force environment variable BEFORE import
     os.environ["SSQ_GPU"] = "1" if use_gpu else "0"
     from ssqueezepy import cwt
+
+    if channel_outputs is None:
+        channel_outputs = {0: ["amp", "freq", "phase"]}
 
     # Prepare shapes
     BATCH_SIZE, C, T = data.shape
@@ -289,7 +292,7 @@ def generate_cwt_image_cellstreams(
     mean_center=False,
     carrier_channel=0,
     channel_names=None,
-    channel_outputs={0: ["amp", "freq", "phase"]},
+    channel_outputs=None,
     sampling=None,
     return_timeseries=False,
     **ssqueezepy_cwt_kwargs,
@@ -307,6 +310,9 @@ def generate_cwt_image_cellstreams(
     # gpu environment setup for squeezepy
     os.environ["SSQ_GPU"] = "1" if use_gpu else "0"
 
+    if channel_outputs is None:
+        channel_outputs = {0: ["amp", "freq", "phase"]}
+
     img = normalize_dims(img, 1)
 
     if sampling is not None:
@@ -314,15 +320,15 @@ def generate_cwt_image_cellstreams(
 
     # image pre-processing
     if downsample_by is not None:
-        print(f"Downsampling image by {downsample_by} ...")
+        logger.info(f"Downsampling image by {downsample_by} ...")
         img = downsample(img, downsample_by)
 
     if normalize_histogram is not False:
-        print("Performing histogram normalization on image ...")
+        logger.info("Performing histogram normalization on image ...")
         img = norm_hist(img)
 
     if mean_center is not False:
-        print("Mean centering timeseries ...")
+        logger.info("Mean centering timeseries ...")
         img = img - img.mean(axis=0)
 
     if blocks == "auto":
@@ -332,7 +338,7 @@ def generate_cwt_image_cellstreams(
                 channel_outputs=channel_outputs,
                 **ssqueezepy_cwt_kwargs,
             )
-            print(f"Automatically determined block size: {blocks}")
+            logger.info(f"Automatically determined block size: {blocks}")
 
     preprocessed_timeseries = img
     # reshape image for blocked processing
@@ -350,10 +356,10 @@ def generate_cwt_image_cellstreams(
     block_size = total_pixels // blocks
     remainder = total_pixels % blocks
 
-    print("Generating CWT cellstreams")
+    logger.info("Generating CWT cellstreams")
     cursor = 0  # position in block to process
 
-    for b in progressbar.progressbar(range(blocks)):
+    for b in tqdm(range(blocks)):
         this_block_size = block_size + (1 if b < remainder else 0)
         end = cursor + this_block_size
         block = img[cursor:end]  # (this_block_size, C, T)
@@ -419,10 +425,17 @@ def generate_cwt_image_cellstreams(
 
 def extract_cwt_cellstreams(features, track_masks):
     """extract single-cell trajectories using label_image tracks"""
+    try:
+        from torch_scatter import scatter_mean, scatter_std
+    except ImportError:
+        raise ImportError(
+            "torch-scatter is required for single-cell extraction. "
+            "Install it following: https://github.com/rusty1s/pytorch_scatter"
+        )
 
     # reshape features
     if features.dim() == 3:
-        print("3 channel image detected; unsqueezing C dimension...")
+        logger.info("3 channel image detected; unsqueezing C dimension...")
         features = features.unsqueeze(1)
     T, C, X, Y = features.shape
     features = features.reshape(T, C, -1)

@@ -4,6 +4,8 @@ Pixel profiling and frequency/amplitude landscape generation for microscopy time
 Part of the cellstream experimental suite.
 """
 
+import logging
+logger = logging.getLogger(__name__)
 import os
 import gc
 import pickle
@@ -255,25 +257,25 @@ def batch_profile_pixels(
     all_data_frames = []
     
     # Attempt to set up a progress bar
-    progressbar_available = False
+    tqdm_available = False
     if show_progress:
         try:
-            import progressbar
-            bar = progressbar.ProgressBar(max_value=len(file_paths))
-            progressbar_available = True
+            from tqdm.auto import tqdm
+            bar = tqdm(total=len(file_paths))
+            tqdm_available = True
         except ImportError:
             pass
     
     if isinstance(file_paths, str):
-        print(f"Converting {file_paths} to list of paths...")
+        logger.info(f"Converting {file_paths} to list of paths...")
         file_paths = [path for path in Path(file_paths).iterdir() if path.is_file()]
     
  
 
     for i, fp in enumerate(file_paths):
         fp_path = Path(fp)
-        if show_progress and not progressbar_available:
-            print(f"[{i+1}/{len(file_paths)}] Processing: {fp_path.name} ...")
+        if show_progress and not tqdm_available:
+            logger.info(f"[{i+1}/{len(file_paths)}] Processing: {fp_path.name} ...")
             
         try:
             loaded_img = load_image(str(fp_path))
@@ -297,24 +299,24 @@ def batch_profile_pixels(
             if not df.empty:
                 all_data_frames.append(df)
         except Exception as e:
-            print(f"Error processing {fp_path.name}: {e}")
+            logger.error(f"Error processing {fp_path.name}: {e}")
             
         # Memory Cleanup after each image
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             
-        if show_progress and progressbar_available:
+        if show_progress and tqdm_available:
             bar.update(i + 1)
 
-    if show_progress and progressbar_available:
-        bar.finish()
+    if show_progress and tqdm_available:
+        bar.close()
 
     #bundle data
     if all_data_frames:
         if show_progress:
-            print("Consolidating all data...")
-            result = pd.concat(all_data_frames, ignore_index=True)
+            logger.info("Consolidating all data...")
+        result = pd.concat(all_data_frames, ignore_index=True)
     else:
         result = pd.DataFrame()
 
@@ -591,14 +593,14 @@ def plot_2d_landscape(
 
 def save_landscape(data, filename="landscape_stats.pbz2"):
     """Compresses and saves statistic dict to a .pbz2 file."""
-    print(f"Compressing and saving to {filename}...")
+    logger.info(f"Compressing and saving to {filename}...")
     with bz2.BZ2File(filename, "w") as f:
         pickle.dump(data, f)
-    print(f"Done. File size: {os.path.getsize(filename) / 1024**2:.2f} MB")
+    logger.info(f"Done. File size: {os.path.getsize(filename) / 1024**2:.2f} MB")
 
 
 def load_landscape(filename="landscape_stats.pbz2"):
     """Loads statistic dict from a compressed .pbz2 file."""
-    print(f"Loading {filename}...")
+    logger.info(f"Loading {filename}...")
     with bz2.BZ2File(filename, "rb") as f:
         return pickle.load(f)

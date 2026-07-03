@@ -47,21 +47,21 @@ def register_and_transform_image_timeseries(
     
     A = tmats_tensor[:, 0, 0]
     B = tmats_tensor[:, 0, 1]
-    C = tmats_tensor[:, 0, 2]
+    tx = tmats_tensor[:, 0, 2]
     D = tmats_tensor[:, 1, 0]
     E = tmats_tensor[:, 1, 1]
-    G = tmats_tensor[:, 1, 2]
+    ty = tmats_tensor[:, 1, 2]
     
     h_ratio = (H - 1) / (W - 1)
     w_ratio = (W - 1) / (H - 1)
     
     theta[:, 0, 0] = A
     theta[:, 0, 1] = B * h_ratio
-    theta[:, 0, 2] = A + B * h_ratio - 1 + 2.0 * C / (W - 1)
+    theta[:, 0, 2] = A + B * h_ratio - 1 + 2.0 * tx / (W - 1)
     
     theta[:, 1, 0] = D * w_ratio
     theta[:, 1, 1] = E
-    theta[:, 1, 2] = D * w_ratio + E - 1 + 2.0 * G / (H - 1)
+    theta[:, 1, 2] = D * w_ratio + E - 1 + 2.0 * ty / (H - 1)
     
     # Create affine grid and sample
     grid = F.affine_grid(theta, img.size(), align_corners=True)

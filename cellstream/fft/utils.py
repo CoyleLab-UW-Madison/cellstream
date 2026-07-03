@@ -23,8 +23,10 @@ Main Components:
     Aggregates FFT-derived features at the single-cell level using segmentation masks.
 """
 
+import logging
+logger = logging.getLogger(__name__)
 import warnings
-import progressbar
+from tqdm.auto import tqdm
 import torch
 
 from ..utils import normalize_dims, normalize_histogram as norm_hist, downsample
@@ -110,12 +112,7 @@ def generate_fft_features(
     max_bin=None,
     batch_size=None,
     device=None,
-    fft_features_to_process=[
-        "full_amplitude",
-        "normalized_amplitude",
-        "z_score",
-        "phase",
-    ],
+    fft_features_to_process=None,
     downsample_by=None,
     return_timeseries=False,
     **kwargs,
@@ -152,10 +149,13 @@ def generate_fft_features(
         Dictionary of FFT features keyed by feature type, each of shape (F, C, X, Y).
     """
 
+    if fft_features_to_process is None:
+        fft_features_to_process = ["full_amplitude", "normalized_amplitude", "z_score", "phase"]
+
     image = normalize_dims(image, 1)
 
     if downsample_by is not None:
-        print(f"Downsampling image by {downsample_by} ...")
+        logger.info(f"Downsampling image by {downsample_by} ...")
         image = downsample(image, downsample_by)
 
     if batch_size == "auto":
@@ -165,7 +165,7 @@ def generate_fft_features(
                 fft_features_to_process,
                 max_bin,
             )
-            print(f"Automatically determined batch size: {batch_size}")
+            logger.info(f"Automatically determined batch size: {batch_size}")
 
     T, C, X, Y = image.shape
     F = T // 2 + 1
@@ -182,17 +182,14 @@ def generate_fft_features(
 
     feature_map = {}
 
-    def allocate(shape):
-        return torch.empty(shape if batch_size else None)
-
     if batch_size is not None:
         centered_image = centered_image.reshape(T, C, X * Y)
-        bar = progressbar.ProgressBar(max_value=X * Y)
+        bar = tqdm(total=X * Y)
 
         # Allocate
         buffers = {}
         for f in fft_features_to_process:
-            buffers[f] = allocate((max_bin, C, X * Y))
+            buffers[f] = torch.empty((max_bin, C, X * Y))
 
         for start in range(0, X * Y, batch_size):
             end = min(start + batch_size, X * Y)
@@ -268,12 +265,7 @@ def query_fft_features(
     carrier_index,
     sampling=None,
     peak_method="normalized_amplitude",
-    fft_features_to_process=[
-        "full_amplitude",
-        "normalized_amplitude",
-        "z_score",
-        "phase",
-    ],
+    fft_features_to_process=None,
     **kwargs,
 ):
     """
@@ -302,15 +294,16 @@ def query_fft_features(
         at the peak frequency per pixel, along with the raw peak frequency index and optionally Hz.
     """
 
+    if fft_features_to_process is None:
+        fft_features_to_process = ["full_amplitude", "normalized_amplitude", "z_score", "phase"]
+
     if peak_method not in fft_features_to_process:
         if "normalized_amplitude" in fft_features_to_process:
             peak_method = "normalized_amplitude"
-            print(
-                f"{peak_method} not in features; defaulting to normalized amplitude..."
-            )
+            logger.warning(f"{peak_method} not in features; defaulting to normalized amplitude...")
         elif "z_score" in fft_features_to_process:
             peak_method = "z_score"
-            print(f"{peak_method} not in features; defaulting to z-score amplitude...")
+            logger.warning(f"{peak_method} not in features; defaulting to z-score amplitude...")
 
     num_channels = fft_features[peak_method].shape[1]
     maxes, argmaxes = torch.max(fft_features[peak_method][cutoff_frequency_bin:], dim=0)

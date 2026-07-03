@@ -6,7 +6,7 @@ Time-domain filtering utilities for image timeseries.
 
 import torch
 import torch.nn.functional as F
-import progressbar
+from tqdm.auto import tqdm
 from .utils import normalize_dims
 
 def create_ir_filter(cutoff_freq, high_pass=False, window_size=101):
@@ -56,7 +56,7 @@ def apply_fir_filter(image, impulse_response, batch_size=None):
         output = F.conv1d(input_reshaped, kernel, padding=padding)
     else:
         output_chunks = []
-        for batch in progressbar.progressbar(torch.split(input_reshaped, batch_size, dim=0)):
+        for batch in tqdm(torch.split(input_reshaped, batch_size, dim=0)):
             output_chunks.append(F.conv1d(batch, kernel, padding=padding))
         output = torch.cat(output_chunks, dim=0)
 

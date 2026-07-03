@@ -4,15 +4,13 @@ cellstream.io
 Loading and saving images, masks, and Zarr stores.
 """
 
+import logging
+logger = logging.getLogger(__name__)
 import nd2
 import numpy as np
 import tifffile
 import torch
 import zarr
-
-import torch
-import zarr
-import numpy as np
 
 class TorchZarrStore:
     """Wrapper around Zarr group or array (v2 or v3) to return Torch tensors."""
@@ -100,7 +98,7 @@ def load_image(filename):
     
     # Ensure 4D (T, C, X, Y)
     if tensor.dim() == 3:
-        print("Single-channel image detected; adding channel dimension...")
+        logger.info("Single-channel image detected; adding channel dimension...")
         tensor = tensor.unsqueeze(1)
     
     return tensor
@@ -169,7 +167,7 @@ def _write_dict_to_zarr_group(group, d, chunks=True, compressor=None):
             try:
                 group.attrs[str(meta_k)] = _sanitize_metadata(meta_v)
             except Exception as e:
-                print(f"Warning: Could not save attribute {meta_k} to Zarr: {e}")
+                logger.warning(f"Warning: Could not save attribute {meta_k} to Zarr: {e}")
 
     for k, v in d.items():
         if k == "_attrs":

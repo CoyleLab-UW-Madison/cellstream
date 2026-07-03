@@ -4,8 +4,10 @@ cellstream.cwt.process
 High-level Continuous Wavelet Transform (CWT) processing pipelines.
 """
 
+import logging
+logger = logging.getLogger(__name__)
 import os
-import progressbar
+from tqdm.auto import tqdm
 import torch
 import pandas as pd
 import numpy as np
@@ -29,7 +31,7 @@ def process_cwt_image_cellstreams(
     mean_center=False,
     carrier_channel=0,
     channel_names=None,
-    channel_outputs={0: ["amp", "freq", "phase"]},
+    channel_outputs=None,
     sampling=None,
     image_filename=None,
     masks_filename=None,
@@ -40,6 +42,9 @@ def process_cwt_image_cellstreams(
     Generates a tidy pandas DataFrame containing extracted single-cell trajectories.
     """
     image = normalize_dims(image, 1)
+
+    if channel_outputs is None:
+        channel_outputs = {0: ["amp", "freq", "phase"]}
     
     if downsample_by is not None:
         image = downsample(image, downsample_by)
@@ -112,7 +117,7 @@ def process_folder_cwt_cellstreams(images_directory, masks_directory, **kwargs):
     images = sorted(os.listdir(images_directory))
     data = []
     
-    for image_filename in progressbar.progressbar(images):
+    for image_filename in tqdm(images):
         name, ext = os.path.splitext(image_filename)
         ext = ext.lower().lstrip(".")
         
@@ -131,10 +136,10 @@ def process_folder_cwt_cellstreams(images_directory, masks_directory, **kwargs):
                     masks_filename = masks_filename_alt
                     
             if not os.path.exists(mask_path):
-                print(f"[warn] Mask file not found: {mask_path}. Skipping.")
+                logger.warning(f" Mask file not found: {mask_path}. Skipping.")
                 continue
                 
-            print(f"Processing CWT: {image_path} with {mask_path}")
+            logger.info(f"Processing CWT: {image_path} with {mask_path}")
             image = load_image(image_path)
             masks = load_masks(mask_path)
             
@@ -149,7 +154,7 @@ def process_folder_cwt_cellstreams(images_directory, masks_directory, **kwargs):
                 if not pos_data_for_image.empty:
                     data.append(pos_data_for_image)
             except Exception as e:
-                print(f"Error processing {image_filename}: {e}")
+                logger.error(f"Error processing {image_filename}: {e}")
                 
     if not data:
         return pd.DataFrame()

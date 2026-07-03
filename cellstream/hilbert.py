@@ -5,7 +5,7 @@ Hilbert transform for computing analytical signals and instantaneous phase/ampli
 """
 
 import torch
-import progressbar
+from tqdm.auto import tqdm
 from .utils import normalize_dims, normalize_histogram as norm_hist
 
 def hilbert_transform(
@@ -32,7 +32,7 @@ def hilbert_transform(
 
     if batch_size is not None:
         image = image.reshape(T, C, X * Y)
-        bar = progressbar.ProgressBar(max_value=X * Y)
+        bar = tqdm(total=X * Y)
         ht_image = torch.zeros((T, C, X * Y), dtype=torch.complex64)
 
         for start in range(0, X * Y, batch_size):

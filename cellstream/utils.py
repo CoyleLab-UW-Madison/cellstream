@@ -4,9 +4,11 @@ cellstream.utils
 General utility functions for image processing and tensor manipulation.
 """
 
+import logging
+logger = logging.getLogger(__name__)
 import torch
 import torch.nn.functional as F
-import progressbar
+from tqdm.auto import tqdm
 
 def normalize_dims(image, channel_dim=1):
     """
@@ -16,7 +18,7 @@ def normalize_dims(image, channel_dim=1):
     if image.dim() == 4:
         return image
     elif image.dim() == 3:
-        print("Single-channel image detected; adding channel dimension...")
+        logger.info("Single-channel image detected; adding channel dimension...")
         return image.unsqueeze(channel_dim)
     else:
         raise ValueError(
@@ -83,7 +85,7 @@ def convolve_along_timeseries(video_tensor, kernel_weights, batch_size=512):
     conv.weight.requires_grad_(False)
 
     output_chunks = []
-    for batch in progressbar.progressbar(torch.split(input_reshaped, batch_size, dim=0)):
+    for batch in tqdm(torch.split(input_reshaped, batch_size, dim=0)):
         with torch.no_grad():
             output_chunk = conv(batch)
         output_chunks.append(output_chunk)
@@ -92,12 +94,12 @@ def convolve_along_timeseries(video_tensor, kernel_weights, batch_size=512):
     # Reshape back to (T, C, H, W)
     return output.reshape(C, H, W, T).permute(3, 0, 1, 2)
 
-def corr_along_axis(series_a, series_b, window=10, step=1, normalize_histogram=True):
+def corr_along_axis(series_a, series_b, window=10, step=1, norm_histogram=True):
     """
     Compute sliding window Pearson correlation between two image timeseries.
     Assumes (T, 1, H, W) shape.
     """
-    if normalize_histogram:
+    if norm_histogram:
         series_a = normalize_histogram(series_a)
         series_b = normalize_histogram(series_b)
     
