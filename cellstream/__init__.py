@@ -24,6 +24,7 @@ from . import hilbert
 from . import filters
 from . import registration
 from . import phase
+from . import pixels
 from . import experimental
 
 # Convenience re-exports for common functions
@@ -46,6 +47,7 @@ __all__ = [
     "filters",
     "registration",
     "phase",
+    "pixels",
     "experimental",
     "load_image",
     "load_masks",

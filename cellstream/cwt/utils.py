@@ -353,6 +353,7 @@ def generate_cwt_image_cellstreams(
 
     # setup blocked processing loop parameters
     total_pixels = X * Y
+    blocks = min(blocks, total_pixels)
     block_size = total_pixels // blocks
     remainder = total_pixels % blocks
 
