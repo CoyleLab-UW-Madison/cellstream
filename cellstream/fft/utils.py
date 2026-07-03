@@ -81,8 +81,8 @@ def _infer_batch_size(
         max_bin = F
     
     # Peak memory usage within the loop for a single pixel
-    # fft_chunk (complex64) + amp (float32) + other intermediates
-    mem_per_pixel = (F * C * 8) + (F * C * 4) 
+    # input_batch (float32) + fft_chunk (complex64) + amp (float32) + other intermediates
+    mem_per_pixel = (T * C * 4) + (F * C * 8) + (F * C * 4) 
 
     # Add memory for the features that are computed
     num_features = len(fft_features_to_process)
@@ -187,6 +187,7 @@ def generate_fft_features(
         bar = tqdm(total=X * Y)
 
         # Allocate
+        logger.info("Pre-allocating output arrays...")
         buffers = {}
         for f in fft_features_to_process:
             buffers[f] = torch.empty((max_bin, C, X * Y))
@@ -216,7 +217,7 @@ def generate_fft_features(
                 phase = fft_chunk.angle()
                 buffers["phase"][:, :, start:end] = phase[:max_bin].cpu()
 
-            bar.update(end)
+            bar.update(end - start)
 
         for key in buffers:
             feature_map[key] = buffers[key].reshape(max_bin, C, X, Y)

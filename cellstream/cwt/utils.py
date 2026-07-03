@@ -194,7 +194,7 @@ def _infer_blocks(
     img_shape,
     use_gpu,
     channel_outputs,
-    buffer_fraction=0.2,
+    buffer_fraction=0.5,
     **ssqueezepy_cwt_kwargs,
 ):
     """
@@ -202,11 +202,6 @@ def _infer_blocks(
     """
     T, C, X, Y = img_shape
     total_pixels = X * Y
-
-    num_outputs=sum(len(outputs) for outputs in channel_outputs.values())
-    if num_outputs==0:
-        num_outputs=1
-    buffer_fraction=buffer_fraction/num_outputs
 
     if use_gpu:
         try:
@@ -256,21 +251,26 @@ def _infer_blocks(
 
         _, scales = cwt(dummy_input, **ssqueezepy_cwt_kwargs)
         num_scales = len(scales)
+        
+        # ssqueezepy typically pads the sequence length to the next power of 2 internally for FFTs
+        padded_T = 2 ** int(np.ceil(np.log2(T)))
 
-        # Memory for one pixel's CWT result (complex64 -> 8 bytes)
-        mem_per_pixel_cwt = num_scales * T * 8  # 8 bytes for complex64
-
+        # Memory for one pixel's CWT result inside ssqueezepy (complex64 -> 8 bytes)
+        mem_per_pixel_cwt = num_scales * padded_T * 8  
+        
         num_channels_to_process = len(channel_outputs)
 
-        # Total memory for CWTs for one pixel across all processed channels
-        total_mem_per_pixel = mem_per_pixel_cwt * num_channels_to_process
+        # CWT peak memory usage per pixel (approximate):
+        # 1. We compute CWT for one channel at a time: `mem_per_pixel_cwt * 2` (to account for PyTorch intermediate FFT arrays)
+        # 2. We keep a subset of scales (`Twx_sub`) for ALL channels in `split_channels`: roughly `num_scales * T * 8 * num_channels_to_process`
+        total_mem_per_pixel = (mem_per_pixel_cwt * 2) + (num_scales * T * 8 * num_channels_to_process)
 
         # Max pixels we can process in a single block
-        # Add a small epsilon to avoid division by zero
         max_pixels_in_block = mem_to_use / (total_mem_per_pixel + 1e-9)
 
-        # How many blocks we need
+        # How many blocks we need (minimum 1)
         num_blocks = total_pixels / (max_pixels_in_block + 1e-9)
+        num_blocks = max(1, num_blocks)
 
         return int(np.ceil(num_blocks))
 
@@ -346,6 +346,7 @@ def generate_cwt_image_cellstreams(
     img = img.reshape(T, C, X * Y).permute(2, 1, 0)  # shape is now (x*y,c,t)
 
     # pre-allocate outputs
+    logger.info("Pre-allocating output arrays...")
     final = {c: {} for c in channel_outputs}
     for c in channel_outputs:
         for k in channel_outputs[c]:
