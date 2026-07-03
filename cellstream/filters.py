@@ -11,22 +11,27 @@ from .utils import normalize_dims
 
 def create_ir_filter(cutoff_freq, high_pass=False, window_size=101):
     """
-    Create a sinc impulse response filter.
-    Note: Requires torchaudio for sinc_impulse_response.
+    Create a sinc impulse response filter natively in PyTorch.
     """
-    try:
-        import torchaudio.prototype.functional as F_proto
-    except ImportError:
-        raise ImportError("torchaudio is required for create_ir_filter.")
-
     if not isinstance(cutoff_freq, torch.Tensor):
-            cutoff_freq = torch.as_tensor(cutoff_freq)
+        cutoff_freq = torch.as_tensor(cutoff_freq, dtype=torch.float32)
+    elif not cutoff_freq.is_floating_point():
+        cutoff_freq = cutoff_freq.float()
         
-    impulse_response = F_proto.sinc_impulse_response(cutoff_freq, window_size=window_size)
+    if window_size % 2 == 0:
+        raise ValueError(f"window_size must be odd. Given: {window_size}")
+
+    half = window_size // 2
+    device, dtype = cutoff_freq.device, cutoff_freq.dtype
+    idx = torch.linspace(-half, half, window_size, device=device, dtype=dtype)
+
+    impulse_response = torch.special.sinc(cutoff_freq.unsqueeze(-1) * idx.unsqueeze(0))
+    impulse_response = impulse_response * torch.hamming_window(window_size, device=device, dtype=dtype, periodic=False).unsqueeze(0)
+    impulse_response = impulse_response / impulse_response.sum(dim=-1, keepdim=True).abs()
     
     if high_pass:
         delta = torch.zeros_like(impulse_response)
-        delta[..., impulse_response.size(-1) // 2] = 1
+        delta[..., window_size // 2] = 1
         impulse_response = delta - impulse_response
     
     return impulse_response

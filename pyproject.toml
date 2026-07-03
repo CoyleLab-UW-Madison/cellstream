@@ -19,7 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 registration = ["pystackreg"]
-filters = ["torchaudio"]
+filters = []
 profiling = ["psutil", "scipy"]
 viz = ["napari"]
 all = ["cellstream[registration,filters,profiling,viz]"]
