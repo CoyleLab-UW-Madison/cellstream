@@ -137,4 +137,33 @@ def hann_image_series(img,norm_histogram=False):
     hann_series=hann.view(T, 1, 1, 1)
     hann_img=img*hann_series
     
-    return hann_img
+def get_auto_batch_size(
+    tensor_shape,
+    dtype=torch.float32,
+    device='cpu',
+    buffer_fraction=0.5,
+    bytes_per_element_multiplier=10
+):
+    """
+    Generic auto batch size calculator for memory-intensive operations.
+    Returns the number of pixels/elements to process in one batch.
+    """
+    import psutil
+    
+    T = tensor_shape[0] if len(tensor_shape) > 0 else 1
+    element_size = 4 if dtype == torch.float32 else 8
+    if dtype in (torch.complex64,):
+        element_size = 8
+        
+    bytes_per_pixel = T * element_size * bytes_per_element_multiplier
+    
+    if str(device) == 'cuda' and torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        total_mem = torch.cuda.get_device_properties(0).total_memory
+        available_mem = total_mem - torch.cuda.memory_allocated(0)
+    else:
+        available_mem = psutil.virtual_memory().available
+        
+    mem_to_use = available_mem * buffer_fraction
+    batch_size = max(1, int(mem_to_use / bytes_per_pixel))
+    return batch_size

@@ -21,7 +21,7 @@ def profile_image_pixels(
     peak_constraint='exactly_one',
     device=None,
     max_fft_bin=50,
-    fft_batch_size=250,
+    fft_batch_size='auto',
     filename_label="unknown"
 ):
     """
@@ -141,7 +141,7 @@ def batch_profile_pixels(
     registration_kwargs=None,
     device=None,
     max_fft_bin=50,
-    fft_batch_size=250,
+    fft_batch_size='auto',
     show_progress=True
 ):
     """

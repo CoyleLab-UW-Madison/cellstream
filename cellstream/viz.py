@@ -35,7 +35,8 @@ def color_by_axis(img, cmap="turbo", proj="max", minmax_norm=True):
 
     out = torch.zeros((C, X, Y, 3), dtype=img.dtype)
 
-    for c in range(C):
+    from tqdm.auto import tqdm
+    for c in tqdm(range(C)):
         channel_img = img[:, c, :, :] # (F, X, Y)
         color_stack = colors * channel_img[:, :, :, None] # (F, X, Y, 3)
 

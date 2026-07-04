@@ -36,13 +36,22 @@ def create_ir_filter(cutoff_freq, high_pass=False, window_size=101):
     
     return impulse_response
 
-def apply_fir_filter(image, impulse_response, batch_size=None):
+def apply_fir_filter(image, impulse_response, batch_size='auto'):
     """
     Apply a FIR filter along the time axis of an image tensor (T, C, X, Y).
     """
+    from .utils import get_auto_batch_size
     image = normalize_dims(image, 1)
     T, C, X, Y = image.shape
     N = C * X * Y
+    
+    if batch_size == 'auto':
+        batch_size = get_auto_batch_size(
+            (T,), 
+            dtype=image.dtype, 
+            device=image.device,
+            bytes_per_element_multiplier=4
+        )
 
     # Reshape to (N, 1, T) for Conv1d
     input_reshaped = image.permute(1, 2, 3, 0).reshape(N, 1, T)

@@ -15,13 +15,20 @@ def winding_number(phase_img, n=5, mode="replicate", row_blocks=1, device='cpu')
     assert n % 2 == 1, "Window size n must be odd"
     pad = n // 2
 
-    # Standardize to 4D (N, C, H, W)
+    original_shape = phase_img.shape
+    if phase_img.ndim < 2:
+        raise ValueError("Phase image must have at least 2 spatial dimensions (H, W)")
+
+    H, W = original_shape[-2:]
+    
     if phase_img.ndim == 2:
         img_4d = phase_img.unsqueeze(0).unsqueeze(0)
     elif phase_img.ndim == 3:
         img_4d = phase_img.unsqueeze(0)
     else:
-        img_4d = phase_img
+        C = original_shape[-3]
+        N = torch.tensor(original_shape[:-3]).prod().item() if len(original_shape) > 3 else 1
+        img_4d = phase_img.reshape(N, C, H, W)
 
     img_4d = img_4d.to(device)
     N, C, H, W = img_4d.shape
@@ -39,6 +46,16 @@ def winding_number(phase_img, n=5, mode="replicate", row_blocks=1, device='cpu')
     idx += [(n-1, j) for j in reversed(range(n))]
     idx += [(i, 0) for i in reversed(range(1, n-1))]
     idx = torch.tensor(idx, device=device)
+    
+    if row_blocks == 'auto':
+        from .utils import get_auto_batch_size
+        row_blocks = get_auto_batch_size(
+            (N * W,), # Batch size represents number of rows (each row has N*W pixels)
+            dtype=img_4d.dtype, 
+            device=device,
+            bytes_per_element_multiplier=C * n * 20 # 20n footprint due to intermediate diff tensors
+        )
+        row_blocks = max(1, row_blocks)
 
     # Process in row blocks to save memory
     for row_start in tqdm(range(0, H, row_blocks)):
@@ -66,8 +83,4 @@ def winding_number(phase_img, n=5, mode="replicate", row_blocks=1, device='cpu')
         winding[:, :, row_start:row_end, :] = diffs.sum(dim=-1) / (2 * torch.pi)
 
     # Restore original shape
-    if phase_img.ndim == 2:
-        return winding.squeeze(0).squeeze(0)
-    elif phase_img.ndim == 3:
-        return winding.squeeze(0)
-    return winding
+    return winding.reshape(original_shape)
