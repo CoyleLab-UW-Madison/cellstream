@@ -36,6 +36,51 @@ def create_ir_filter(cutoff_freq, high_pass=False, window_size=101):
     
     return impulse_response
 
+def create_bandpass_filter(low_cutoff, high_cutoff, window_size=101):
+    """
+    Create a bandpass impulse response filter natively in PyTorch
+    by subtracting two normalized low-pass sinc filters.
+    """
+    if not isinstance(low_cutoff, torch.Tensor):
+        low_cutoff = torch.as_tensor(low_cutoff, dtype=torch.float32)
+    elif not low_cutoff.is_floating_point():
+        low_cutoff = low_cutoff.float()
+        
+    if not isinstance(high_cutoff, torch.Tensor):
+        high_cutoff = torch.as_tensor(high_cutoff, dtype=torch.float32)
+    elif not high_cutoff.is_floating_point():
+        high_cutoff = high_cutoff.float()
+
+    if torch.any(low_cutoff >= high_cutoff):
+        raise ValueError("low_cutoff must be strictly less than high_cutoff.")
+
+    if window_size % 2 == 0:
+        raise ValueError(f"window_size must be odd. Given: {window_size}")
+
+    device, dtype = low_cutoff.device, low_cutoff.dtype
+    high_cutoff = high_cutoff.to(device=device, dtype=dtype)
+    
+    half = window_size // 2
+    idx = torch.linspace(-half, half, window_size, device=device, dtype=dtype)
+    
+    # 1. Generate the two underlying low-pass sinc responses
+    lp_low = torch.special.sinc(low_cutoff.unsqueeze(-1) * idx.unsqueeze(0))
+    lp_high = torch.special.sinc(high_cutoff.unsqueeze(-1) * idx.unsqueeze(0))
+    
+    # 2. Apply the window function to both to reduce spectral leakage
+    window = torch.hamming_window(window_size, device=device, dtype=dtype, periodic=False).unsqueeze(0)
+    lp_low = lp_low * window
+    lp_high = lp_high * window
+    
+    # 3. Normalize each low-pass component individually so their DC gains equal 1
+    lp_low = lp_low / lp_low.sum(dim=-1, keepdim=True).abs()
+    lp_high = lp_high / lp_high.sum(dim=-1, keepdim=True).abs()
+    
+    # 4. Subtract the lower low-pass from the higher low-pass to get the bandpass
+    bandpass_ir = lp_high - lp_low
+    
+    return bandpass_ir
+
 def apply_fir_filter(image, impulse_response, batch_size='auto'):
     """
     Apply a FIR filter along the time axis of an image tensor (T, C, X, Y).
