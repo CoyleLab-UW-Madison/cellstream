@@ -8,26 +8,34 @@ Fast image analysis tools for digital signal processing of single-cell data stre
 
 ## Key Features
 
-- Fast FFT / CWT / Hilbert / and filter-bank transforms of large image stacks
-- Optimized image processing methods for
-  - frequency/temporal re-coloring
-  - downsampling, along-axis convolution
-  - multi-channel image registration (requires [pystackreg](https://github.com/glichtner/pystackreg))
-  - phase-field defect detection and analysis
-- Fast multi-channel query tools for dynamic reporters that are coupled to carrier signals
-- Efficient per-cell extraction and summarization of dynamic datastreams
-- Zarr-based results management
+- **Pixel-Level Signal Processing**: Fast FFT, CWT, Hilbert, and filter-bank transforms of large image stacks.
+- **Image Sequence Utilities**: Optimized methods for temporal re-coloring, downsampling, and along-axis convolution.
+- **Single-Cell Extraction**: Efficient per-cell extraction of multidimensional time-series and summary statistics using segmentation masks.
+- **Zarr-Based Data Management**: Chunked reading and writing for out-of-core processing of large microscopy datasets.
 
 ---
 
 ## Installation
 
-This package requires PyTorch and `torch-scatter` for full functionality. These must be installed manually to match your system and GPU configuration. See the [PyTorch](https://pytorch.org/) and [torch-scatter](https://github.com/rusty1s/pytorch_scatter) installation instructions for guidance.
+### Interactive Exploration
+For interactive data exploration and visualization, we highly recommend using our **[napari-cellstream](https://github.com/CoyleLab-UW-Madison/napari-cellstream)** plugin. The `environment.yml` provided in this repository is specifically geared towards setting up a compatible environment for the napari plugin and its dependencies.
+
+### Headless Batch Processing
+For high-throughput or remote server environments, a `Dockerfile` is provided for running `cellstream` headlessly with full GPU acceleration. 
+
+### Manual Installation
+This package requires PyTorch and `torch-scatter` for full functionality. These must be installed to match your system and GPU configuration. See the [PyTorch](https://pytorch.org/) and [torch-scatter](https://github.com/rusty1s/pytorch_scatter) installation instructions for guidance.
 
 Once dependencies are configured, install the package with:
 
 ```bash
 pip install git+https://github.com/CoyleLab-UW-Madison/cellstream
+```
+
+and for the **[napari-cellstream](https://github.com/CoyleLab-UW-Madison/napari-cellstream)** plugin:
+
+```bash
+pip install git+https://github.com/CoyleLab-UW-Madison/napari-cellstreamream
 ```
 
 Note this package is still in early stages of development.

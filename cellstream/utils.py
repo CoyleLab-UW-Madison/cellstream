@@ -91,8 +91,9 @@ def convolve_along_timeseries(video_tensor, kernel_weights, batch_size=512):
         output_chunks.append(output_chunk)
 
     output = torch.cat(output_chunks, dim=0)
-    # Reshape back to (T, C, H, W)
-    return output.reshape(C, H, W, T).permute(3, 0, 1, 2)
+    # Reshape back to (T_out, C, H, W)
+    T_out = output.shape[-1]
+    return output.reshape(C, H, W, T_out).permute(3, 0, 1, 2)
 
 def corr_along_axis(series_a, series_b, window=10, step=1, norm_histogram=True):
     """
@@ -133,10 +134,10 @@ def hann_image_series(img,norm_histogram=False):
         img=normalize_histogram(img)
         
     T=img.shape[0]
-    hann=torch.hann_window(T)
+    hann=torch.hann_window(T, device=img.device)
     hann_series=hann.view(T, 1, 1, 1)
     hann_img=img*hann_series
-    
+    return hann_img
 def get_auto_batch_size(
     tensor_shape,
     dtype=torch.float32,

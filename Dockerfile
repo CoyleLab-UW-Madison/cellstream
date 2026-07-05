@@ -17,12 +17,10 @@ WORKDIR /app
 # Upgrade pip
 RUN pip install --upgrade pip
 
-# The critical step: install torch-scatter directly from the PyG wheel index
 # This URL MUST match the PyTorch and CUDA versions of the base image (torch 2.2.0, cu118)
 RUN pip install torch-scatter -f https://data.pyg.org/whl/torch-2.2.0+cu118.html
 
 # Install the rest of the dependencies
-# Note: napari is excluded here because this Dockerfile is intended for headless/server batch processing
 RUN pip install \
     "numpy<2" \
     pandas \
@@ -37,11 +35,9 @@ RUN pip install \
     pystackreg
 
 # Clone and install the cellstream repository
-# (In a real CI/CD pipeline, you might COPY local files instead of cloning)
 RUN git clone https://github.com/CoyleLab-UW-Madison/cellstream.git && \
     cd cellstream && \
     pip install -e .
 
-# Define the entrypoint (can be overridden by docker run commands)
-# Example usage: docker run --gpus all -v /local/data:/app/data cellstream-headless python /app/cellstream/examples/process_batch.py
+# Example usage: docker run --gpus all -v /local/data:/app/data cellstream-headless python /app/cellstream/examples/cellstream_cwt_example___generate_cwts.py
 CMD ["/bin/bash"]
