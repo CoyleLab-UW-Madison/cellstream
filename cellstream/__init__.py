@@ -20,6 +20,7 @@ from . import image
 # Specialized transform/processing modules
 from . import fft
 from . import cwt
+from . import sfft
 from . import hilbert
 from . import filters
 from . import registration
@@ -43,6 +44,7 @@ __all__ = [
     "image",
     "fft",
     "cwt",
+    "sfft",
     "hilbert",
     "filters",
     "registration",

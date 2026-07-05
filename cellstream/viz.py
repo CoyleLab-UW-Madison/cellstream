@@ -8,49 +8,57 @@ import matplotlib.pyplot as plt
 import torch
 import functools
 
-def color_by_axis(img, cmap="turbo", proj="max", minmax_norm=True):
+def color_by_axis(img, axis=0, cmap="turbo", proj="max", minmax_norm=True):
     """
-    Apply a colormap along the 0-th axis (e.g., frequency or scale bins).
-    Returns (C, X, Y, 3) RGB images.
+    Apply a colormap along the specified axis (e.g., frequency or filter banks).
+    Returns an RGB image tensor where the chosen axis is reduced and a trailing '3' dimension is added.
     """
-    img_ndim = img.dim()
-    five_d = False
-    if img_ndim == 5:
-        five_d = True
-        C, T, F, X, Y = img.shape
-        img = img.permute(2, 0, 1, 3, 4).reshape(F, T * C, X, Y)
-        C = T * C
-    elif img_ndim == 4:
-        F, C, X, Y = img.shape
-    else:
-        raise ValueError(f"Expected 4D or 5D tensor, got {img_ndim}D")
+    if axis < 0:
+        axis = img.ndim + axis
 
+    if axis >= img.ndim - 2:
+        raise ValueError("Cannot color along the spatial dimensions (last two dimensions).")
+
+    # Normalize
     if minmax_norm:
         img_min = img.min()
         img_max = img.max()
         img = (img - img_min) / (img_max - img_min + 1e-8)
 
-    colors = torch.tensor(plt.get_cmap(cmap).resampled(F)(range(F)), dtype=img.dtype)[:, :3]
+    # Move the chosen axis to the front
+    img_moved = img.movedim(axis, 0)
+    F = img_moved.shape[0]
+    X, Y = img_moved.shape[-2], img_moved.shape[-1]
+    
+    # Identify the remaining dimensions before X and Y
+    other_dims = list(img_moved.shape[1:-2])
+    
+    # Flatten them into a single dimension C to process sequentially (prevents OOM on large stacks)
+    import numpy as np
+    C = int(np.prod(other_dims)) if len(other_dims) > 0 else 1
+    
+    img_reshaped = img_moved.reshape(F, C, X, Y)
+
+    # Generate colors
+    colors = torch.tensor(plt.get_cmap(cmap).resampled(F)(range(F)), dtype=img.dtype, device=img.device)[:, :3]
     colors = colors[:, None, None, :] # (F, 1, 1, 3)
 
-    out = torch.zeros((C, X, Y, 3), dtype=img.dtype)
+    out = torch.zeros((C, X, Y, 3), dtype=img.dtype, device=img.device)
 
     from tqdm.auto import tqdm
-    for c in tqdm(range(C)):
-        channel_img = img[:, c, :, :] # (F, X, Y)
+    for c in tqdm(range(C), desc="Coloring frames", leave=False):
+        channel_img = img_reshaped[:, c, :, :] # (F, X, Y)
         color_stack = colors * channel_img[:, :, :, None] # (F, X, Y, 3)
 
         if proj == "max":
-            proj_rgb = color_stack.max(dim=0).values
+            out[c] = color_stack.max(dim=0).values
         elif proj == "sum":
-            proj_rgb = color_stack.sum(dim=0)
+            out[c] = color_stack.sum(dim=0)
         else:
             raise ValueError("proj must be 'max' or 'sum'")
-        
-        out[c] = proj_rgb
 
-    if five_d:
-        out = torch.stack(out.split(T), dim=1)
+    # Reshape the output back to the original layout (excluding the colored axis, plus RGB)
+    out = out.reshape(*other_dims, X, Y, 3)
 
     return out
 
