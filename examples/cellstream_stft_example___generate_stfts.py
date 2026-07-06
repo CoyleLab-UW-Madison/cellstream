@@ -4,7 +4,7 @@ timeseries_image = cellstream.image.load_image("images/example_timeseries_mini_0
 
 ## perform STFT filter-banking, using 1 bank across frequency bins 0-30
 
-results = cellstream.sfft.generate_stft_image_cellstreams(
+results = cellstream.stft.generate_stft_image_cellstreams(
     ###image file
     timeseries_image,
     ###stft parameters
@@ -22,9 +22,12 @@ results = cellstream.sfft.generate_stft_image_cellstreams(
     normalize_histogram=True,
     ###channel information
     channel_names=["MinE", "MinD"],
-    carrier_channel=1,
-    #channel_outputs={0: ["amp", "phase_difference"], 1: ["amp", "freq","phase"]},
-    channel_outputs={0: ["amp"], 1: ["amp"]},
+    carrier_channel=0,
+    channel_outputs={
+        0: ["amp", "phase_difference"],
+        1: ["amp", "freq"]
+    },
     ##sampling parameters
     sampling={"fs": 2, "N": 361},
 )
+

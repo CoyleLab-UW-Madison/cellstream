@@ -14,7 +14,7 @@ def query_stft_block(
     max_bin=100,
     num_filter_banks=1,
     normalize_amplitudes=False,
-    carrier_channel=0,
+    carrier_channel=None,
     channel_outputs=None,
     use_gpu=False,
     bank_method="max_pool",
@@ -55,84 +55,101 @@ def query_stft_block(
         
         Twx = Twx[..., :T]
         
-        if normalize_amplitudes:
-            split_channels_full_power_sums[channel] = Twx.abs().sum(
-                axis=1, keepdims=True
-            )
+        # Always compute full power sums for normalized outputs
+        split_channels_full_power_sums[channel] = Twx.abs().sum(
+            axis=1, keepdims=True
+        )
         if "z_score" in channel_outputs[channel]:
             split_channels_full_means[channel] = Twx.abs().mean(axis=1, keepdims=True)
             split_channels_full_std[channel] = Twx.abs().std(axis=1, keepdims=True)
         Twx_sub = Twx[:, min_bin:max_bin, :].clone()
         split_channels[channel] = Twx_sub
 
-    carrier_amp = split_channels[carrier_channel].abs()
-    carrier_phase = split_channels[carrier_channel].angle()
+    
+    # Helper to extract carrier from a given channel
+    def _extract_carrier(ch):
+        amp = split_channels[ch].abs()
+        phase = split_channels[ch].angle()
+        if bank_method == "max_pool":
+            max_pooler = torch.nn.AdaptiveMaxPool1d(num_filter_banks, return_indices=True)
+            amp = amp.permute(0, 2, 1)
+            amp, freq = max_pooler(amp)
+            amp = amp.permute(0, 2, 1)
+            freq = freq.permute(0, 2, 1)
+            phase = torch.gather(phase, 1, freq)
+        elif bank_method == "sort":
+            amp, freq = torch.sort(amp, axis=1, descending=True)
+            phase = torch.gather(phase, 1, freq)
+        return amp, freq, phase
 
-    if bank_method == "max_pool":
-        max_pooler = torch.nn.AdaptiveMaxPool1d(num_filter_banks, return_indices=True)
-        carrier_amp = carrier_amp.permute(0, 2, 1)
-        carrier_amp, carrier_freq = max_pooler(carrier_amp)
-        carrier_amp = carrier_amp.permute(0, 2, 1)
-        carrier_freq = carrier_freq.permute(0, 2, 1)
-        carrier_phase = torch.gather(carrier_phase, 1, carrier_freq)
-    elif bank_method == "sort":
-        carrier_amp, carrier_freq = torch.sort(
-            split_channels[carrier_channel].abs(), axis=1, descending=True
-        )
-        carrier_phase = split_channels[carrier_channel].angle()
-        carrier_phase = torch.gather(carrier_phase, 1, carrier_freq)
+    global_carrier_amp, global_carrier_freq, global_carrier_phase = None, None, None
+    if carrier_channel is not None:
+        global_carrier_amp, global_carrier_freq, global_carrier_phase = _extract_carrier(carrier_channel)
 
     results = {c: {} for c in range(C)}
 
+
+    freqs_lookup = None
     if sampling is not None:
         fs = sampling["fs"]
-        N = sampling["N"]
-        
         num_bins = (n_fft // 2) + 1
         freqs_lookup = np.linspace(0, fs/2, num_bins)
-        freqs_lookup = torch.from_numpy(freqs_lookup.astype("float32")).broadcast_to(
-            BATCH_SIZE, T, -1
-        )
+        freqs_lookup = torch.from_numpy(freqs_lookup.astype("float32")).broadcast_to(BATCH_SIZE, T, -1)
         freqs_lookup = freqs_lookup.permute(0, 2, 1)
-        freqs_lookup = freqs_lookup.to(carrier_freq.device)
-        carrier_freq_converted = torch.gather(freqs_lookup, 1, carrier_freq + min_bin)
 
     for channel, returns in channel_outputs.items():
+        if carrier_channel is None:
+            ch_carrier_amp, ch_carrier_freq, ch_carrier_phase = _extract_carrier(channel)
+        else:
+            ch_carrier_amp, ch_carrier_freq, ch_carrier_phase = global_carrier_amp, global_carrier_freq, global_carrier_phase
+
+        if sampling is not None:
+            fl = freqs_lookup.to(ch_carrier_freq.device)
+            ch_carrier_freq_converted = torch.gather(fl, 1, ch_carrier_freq + min_bin)
+
         P = split_channels[channel].abs()
+        # Always compute normalized power if requested or if legacy flag is True
+        if normalize_amplitudes or "normalized_amp" in returns or "normalized_amplitude" in returns:
+            P_norm = P / split_channels_full_power_sums[channel]
+            
         if normalize_amplitudes:
-            P = P / split_channels_full_power_sums[channel]
+            P = P_norm
+        
         if ("phase" in returns) or ("phase_difference" in returns):
             PH = split_channels[channel].angle()
-            ch_ph = torch.gather(PH, 1, carrier_freq)
+            ch_ph = torch.gather(PH, 1, ch_carrier_freq)
+            
         if "phase" in returns:
             results[channel]["phase"] = ch_ph[:, :num_filter_banks, :].cpu()
+            
         if "phase_difference" in returns:
-            results[channel]["phase_difference"] = (
-                ((ch_ph - carrier_phase) % (2 * torch.pi)).abs()
-            )[:, :num_filter_banks, :].cpu()
-        if "amp" in returns:
-            ch_p = torch.gather(P, 1, carrier_freq)
-            results[channel]["amp"] = ch_p[:, :num_filter_banks, :].cpu()
-        if "z_score" in returns:
-            if "amp" in returns:
-                z = (
-                    ch_p - split_channels_full_means[channel]
-                ) / split_channels_full_std[channel]
+            if carrier_channel is None:
+                # If no carrier is specified, phase difference against itself is 0
+                results[channel]["phase_difference"] = torch.zeros_like(ch_ph[:, :num_filter_banks, :]).cpu()
             else:
-                ch_p = torch.gather(P, 1, carrier_freq)
-                z = (
-                    ch_p - split_channels_full_means[channel]
-                ) / split_channels_full_std[channel]
+                results[channel]["phase_difference"] = (((ch_ph - ch_carrier_phase) % (2 * torch.pi)).abs())[:, :num_filter_banks, :].cpu()
+                
+        if "amp" in returns:
+            ch_p = torch.gather(P, 1, ch_carrier_freq)
+            results[channel]["amp"] = ch_p[:, :num_filter_banks, :].cpu()
+            
+        if "normalized_amp" in returns or "normalized_amplitude" in returns:
+            ch_p_norm = torch.gather(P_norm, 1, ch_carrier_freq)
+            if "normalized_amp" in returns:
+                results[channel]["normalized_amp"] = ch_p_norm[:, :num_filter_banks, :].cpu()
+            if "normalized_amplitude" in returns:
+                results[channel]["normalized_amplitude"] = ch_p_norm[:, :num_filter_banks, :].cpu()
+            
+        if "z_score" in returns:
+            ch_p = torch.gather(P, 1, ch_carrier_freq)
+            z = (ch_p - split_channels_full_means[channel]) / split_channels_full_std[channel]
             results[channel]["z_score"] = z[:, :num_filter_banks, :].cpu()
+            
         if "freq" in returns:
             if sampling is not None:
-                results[channel]["freq"] = carrier_freq_converted[
-                    :, :num_filter_banks, :
-                ].cpu()
+                results[channel]["freq"] = ch_carrier_freq_converted[:, :num_filter_banks, :].cpu()
             else:
-                results[channel]["freq"] = (
-                    carrier_freq[:, :num_filter_banks, :].cpu() + min_bin
-                )
+                results[channel]["freq"] = (ch_carrier_freq[:, :num_filter_banks, :].cpu() + min_bin)
 
     return results
 
@@ -198,7 +215,7 @@ def generate_stft_image_cellstreams(
     downsample_by=None,
     normalize_histogram=True,
     mean_center=False,
-    carrier_channel=0,
+    carrier_channel=None,
     channel_names=None,
     channel_outputs=None,
     sampling=None,

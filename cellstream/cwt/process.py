@@ -29,7 +29,7 @@ def process_cwt_image_cellstreams(
     downsample_by=None,
     normalize_histogram=True,
     mean_center=False,
-    carrier_channel=0,
+    carrier_channel=None,
     channel_names=None,
     channel_outputs=None,
     sampling=None,
