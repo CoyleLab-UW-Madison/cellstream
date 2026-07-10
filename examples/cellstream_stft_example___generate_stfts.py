@@ -1,4 +1,5 @@
 import cellstream
+import torch
 
 timeseries_image = cellstream.image.load_image("images/example_timeseries_mini_0.tif")
 
@@ -9,8 +10,10 @@ results = cellstream.stft.generate_stft_image_cellstreams(
     timeseries_image,
     ###stft parameters
     min_bin=5,
-    max_bin=35,
-    n_fft=60,
+    max_bin=30,
+    n_fft=30,
+    #win_length=32,
+    #window=torch.hann_window(32),
     num_filter_banks=8,
     #num_filter_banks=1,
     blocks='auto',
@@ -22,10 +25,10 @@ results = cellstream.stft.generate_stft_image_cellstreams(
     normalize_histogram=True,
     ###channel information
     channel_names=["MinE", "MinD"],
-    carrier_channel=0,
+    carrier_channel=1,
     channel_outputs={
-        0: ["amp", "phase_difference"],
-        1: ["amp", "freq"]
+        0: ["amp", "normalized_amp","z_score","phase_difference"],
+        1: ["amp", "normalized_amp","z_score","freq"]
     },
     ##sampling parameters
     sampling={"fs": 2, "N": 361},
