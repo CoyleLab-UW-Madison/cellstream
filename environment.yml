@@ -32,5 +32,5 @@ dependencies:
       - nd2
       - ssqueezepy  # CWT backend
       - pystackreg  # Registration backend
-      # git+https://github.com/coylelab/cellstream.git
-      # git+https://github.com/coylelab/napari-cellstream.git
+      - git+https://github.com/coylelab/cellstream.git
+      - git+https://github.com/coylelab/napari-cellstream.git

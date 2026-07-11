@@ -27,6 +27,7 @@ from . import registration
 from . import phase
 from . import pixels
 from . import experimental
+from . import spatial
 
 # Convenience re-exports for common functions
 from .io import load_image, load_masks, load_zarr, write_to_zarr
@@ -35,6 +36,7 @@ from .utils import normalize_dims, downsample, normalize_histogram, convolve_alo
 from .analysis import extract_single_cell_data, create_dataframe, reshape_to_longform
 from .viz import color_by_axis, patch_napari_for_torch, map_data_onto_mask
 from .phase import winding_number
+from .spatial import crop_zarr_from_masks
 
 __all__ = [
     "io",
@@ -51,6 +53,7 @@ __all__ = [
     "phase",
     "pixels",
     "experimental",
+    "spatial",
     "load_image",
     "load_masks",
     "load_zarr",
@@ -68,5 +71,5 @@ __all__ = [
     "color_by_axis",
     "patch_napari_for_torch",
     "winding_number",
+    "crop_zarr_from_masks",
 ]
-
