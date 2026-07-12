@@ -44,6 +44,7 @@ def query_cwt_block(
     use_gpu=False,
     bank_method="max_pool",
     sampling=None,
+    freqs_lookup=None,
     **ssqueezepy_cwt_kwargs,
 ):
     """
@@ -116,17 +117,22 @@ def query_cwt_block(
     results = {c: {} for c in range(C)}
 
 
-    freqs_lookup = None
+    freqs_lookup_tensor = None
     if sampling is not None:
-        wavelet = ssqueezepy_cwt_kwargs.get("wavelet", "gmw")
-        from ssqueezepy.experimental import scale_to_freq
-        fs = sampling["fs"]
-        N = sampling["N"]
-        blank_series = torch.ones(T)
-        Twx, scales = cwt(blank_series, **ssqueezepy_cwt_kwargs)
-        freqs_lookup = scale_to_freq(scales, wavelet=wavelet, N=N, fs=fs)
-        freqs_lookup = torch.from_numpy(freqs_lookup.astype("float32")).broadcast_to(BATCH_SIZE, T, -1)
-        freqs_lookup = freqs_lookup.permute(0, 2, 1)
+        if freqs_lookup is None:
+            wavelet = ssqueezepy_cwt_kwargs.get("wavelet", "gmw")
+            from ssqueezepy.experimental import scale_to_freq
+            from ssqueezepy import cwt
+            fs = sampling["fs"]
+            N = sampling["N"]
+            blank_series = np.ones(T)
+            _, scales = cwt(blank_series, **ssqueezepy_cwt_kwargs)
+            freqs_lookup = scale_to_freq(scales, wavelet=wavelet, N=N, fs=fs).astype("float32")
+        
+        if isinstance(freqs_lookup, np.ndarray):
+            freqs_lookup_tensor = torch.from_numpy(freqs_lookup)
+        else:
+            freqs_lookup_tensor = freqs_lookup
 
     for channel, returns in channel_outputs.items():
         if carrier_channel is None:
@@ -135,8 +141,8 @@ def query_cwt_block(
             ch_carrier_amp, ch_carrier_freq, ch_carrier_phase = global_carrier_amp, global_carrier_freq, global_carrier_phase
 
         if sampling is not None:
-            fl = freqs_lookup.to(ch_carrier_freq.device)
-            ch_carrier_freq_converted = torch.gather(fl, 1, ch_carrier_freq + min_scale)
+            fl = freqs_lookup_tensor.to(ch_carrier_freq.device)
+            ch_carrier_freq_converted = fl[ch_carrier_freq + min_scale]
 
         P = split_channels[channel].abs()
         # Always compute normalized power if requested or if legacy flag is True
@@ -352,6 +358,19 @@ def generate_cwt_image_cellstreams(
     block_size = total_pixels // blocks
     remainder = total_pixels % blocks
 
+    # pre-calculate scale-to-frequency lookup table once
+    freqs_lookup = None
+    if sampling is not None:
+        logger.info("Pre-computing CWT scale-to-frequency lookup table...")
+        wavelet = ssqueezepy_cwt_kwargs.get("wavelet", "gmw")
+        from ssqueezepy import cwt
+        from ssqueezepy.experimental import scale_to_freq
+        fs = sampling["fs"]
+        N = sampling["N"]
+        blank_series = np.ones(T)
+        _, scales = cwt(blank_series, **ssqueezepy_cwt_kwargs)
+        freqs_lookup = scale_to_freq(scales, wavelet=wavelet, N=N, fs=fs).astype("float32")
+
     logger.info("Generating CWT cellstreams")
     cursor = 0  # position in block to process
 
@@ -370,6 +389,7 @@ def generate_cwt_image_cellstreams(
             channel_outputs=channel_outputs,
             use_gpu=use_gpu,
             sampling=sampling,
+            freqs_lookup=freqs_lookup,
             **ssqueezepy_cwt_kwargs,
         )
         # Fill in preallocated tensors
