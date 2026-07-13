@@ -165,8 +165,8 @@ def process_cwt_image_cellstreams(
         raw_means = {}
         cell_ids = df["cell_id"].unique() if not df.empty else []
         if len(cell_ids) > 0:
-            if img_np.ndim == 4: # C, T, Y, X
-                time_avg = img_np.mean(axis=1) # C, Y, X
+            if img_np.ndim == 4: # T, C, Y, X
+                time_avg = img_np.mean(axis=0) # C, Y, X
                 for c in range(time_avg.shape[0]):
                     means_c = ndi.mean(time_avg[c], labels=masks_2d_np, index=cell_ids)
                     for i, cid in enumerate(cell_ids):
