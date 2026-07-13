@@ -75,7 +75,7 @@ def process_cwt_image_cellstreams(
     dfs = []
     
     for ch_key, features_dict in cwt_features.items():
-        if ch_key == "_attrs":
+        if ch_key == "_attrs" or not isinstance(features_dict, dict):
             continue
         for feat_key, feat_tensor in features_dict.items():
             # Extract trajectories
