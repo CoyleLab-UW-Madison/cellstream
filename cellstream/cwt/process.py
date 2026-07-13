@@ -35,6 +35,9 @@ def process_cwt_image_cellstreams(
     sampling=None,
     image_filename=None,
     masks_filename=None,
+    crop_zarrs=False,
+    crop_output_path=None,
+    crop_kwargs=None,
     **ssqueezepy_cwt_kwargs,
 ):
     """
@@ -72,6 +75,8 @@ def process_cwt_image_cellstreams(
     dfs = []
     
     for ch_key, features_dict in cwt_features.items():
+        if ch_key == "_attrs":
+            continue
         for feat_key, feat_tensor in features_dict.items():
             # Extract trajectories
             means, stds = extract_cwt_cellstreams(feat_tensor, masks)
@@ -106,9 +111,66 @@ def process_cwt_image_cellstreams(
             dfs.append(df_part)
             
     if not dfs:
-        return pd.DataFrame()
-        
-    return pd.concat(dfs, ignore_index=True)
+        df = pd.DataFrame()
+    else:
+        df = pd.concat(dfs, ignore_index=True)
+
+    # --- Optional cropping ---
+    crop_root = None
+    if crop_zarrs:
+        from ..spatial.crop import crop_zarr_from_masks
+        from ..io import _sanitize_metadata
+
+        if crop_output_path is None:
+            base = os.path.splitext(image_filename)[0] if image_filename else "image"
+            crop_output_path = f"{base}_cwt_crops.zarr"
+
+        ckw = dict(crop_kwargs or {})
+
+        # Ensure mask is 2-D for crop_zarr_from_masks
+        masks_2d = masks
+        if hasattr(masks_2d, 'dim'):
+            while masks_2d.dim() > 2:
+                masks_2d = masks_2d[0]
+        elif hasattr(masks_2d, 'ndim'):
+            while masks_2d.ndim > 2:
+                masks_2d = masks_2d[0]
+
+        logger.info(f"Cropping CWT features to per-cell zarr at {crop_output_path}...")
+        crop_root = crop_zarr_from_masks(
+            cwt_features, masks_2d, crop_output_path, **ckw,
+        )
+
+        # Attach per-cell extracted stats from DataFrame to each cell group
+        if not df.empty:
+            logger.info("Attaching extracted CWT cell data to crop zarr groups...")
+            for cell_key in crop_root.group_keys():
+                cell_group = crop_root[cell_key]
+                label_id = cell_group.attrs.get("label_id", None)
+                if label_id is not None and label_id in df["cell_id"].values:
+                    cell_rows = df[df["cell_id"] == label_id]
+                    # Summarise: for each (channel, feature, filter_bank), store mean and std
+                    summary = {}
+                    for _, row in cell_rows.iterrows():
+                        key = f"ch{row['channel']}_{row['feature']}_bank{row['filter_bank']}"
+                        mean_val = row["mean"]
+                        std_val = row["std"]
+                        if hasattr(mean_val, "item"):
+                            mean_val = mean_val.item()
+                        if hasattr(std_val, "item"):
+                            std_val = std_val.item()
+                        summary[f"{key}_mean"] = mean_val
+                        summary[f"{key}_std"] = std_val
+                    for k, v in _sanitize_metadata(summary).items():
+                        try:
+                            cell_group.attrs[f"extracted_{k}"] = v
+                        except Exception as e:
+                            logger.warning(f"Could not attach attr {k} to {cell_key}: {e}")
+
+    # --- Return ---
+    if crop_zarrs:
+        return (df, crop_root)
+    return df
 
 def process_folder_cwt_cellstreams(images_directory, masks_directory, **kwargs):
     """
@@ -151,8 +213,9 @@ def process_folder_cwt_cellstreams(images_directory, masks_directory, **kwargs):
                     masks_filename=masks_filename,
                     **kwargs,
                 )
-                if not pos_data_for_image.empty:
-                    data.append(pos_data_for_image)
+                df_part = pos_data_for_image[0] if isinstance(pos_data_for_image, tuple) else pos_data_for_image
+                if not df_part.empty:
+                    data.append(df_part)
             except Exception as e:
                 logger.error(f"Error processing {image_filename}: {e}")
                 

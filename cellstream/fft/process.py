@@ -51,6 +51,9 @@ def process_image_cellstreams(
     image_filename=None,
     masks_filename=None,
     downsample_by=None,
+    crop_zarrs=False,
+    crop_output_path=None,
+    crop_kwargs=None,
     **kwargs,
 ):
     """
@@ -94,7 +97,9 @@ def process_image_cellstreams(
     df : pandas.DataFrame
         Table of per-cell FFT-derived features.
     fft_features : dict (optional)
-        Raw FFT features dictionary (if `return_fft_features=True`).
+        Raw FFT features dictionary (if ``return_fft_features=True``).
+    crop_root : zarr.Group (optional)
+        The root zarr group of the cropped store (if ``crop_zarrs=True``).
     """
 
     image = normalize_dims(image, 1)
@@ -143,7 +148,59 @@ def process_image_cellstreams(
     logger.info("making dataframe...")
     df = create_dataframe(results, channel_names, image_filename, masks_filename)
 
-    return (df, fft_features) if return_fft_features else df
+    # --- Optional cropping ---
+    crop_root = None
+    if crop_zarrs:
+        from ..spatial.crop import crop_zarr_from_masks
+        from ..io import _sanitize_metadata
+
+        if crop_output_path is None:
+            base = os.path.splitext(image_filename)[0] if image_filename else "image"
+            crop_output_path = f"{base}_crops.zarr"
+
+        ckw = dict(crop_kwargs or {})
+
+        # Get the primary mask (the "all" key in the masks_dict)
+        primary_mask = masks_dict.get("all", next(iter(masks_dict.values())))
+
+        # Ensure mask is 2-D for crop_zarr_from_masks
+        if primary_mask.dim() > 2:
+            primary_mask = primary_mask[0]
+
+        logger.info(f"Cropping features to per-cell zarr at {crop_output_path}...")
+        crop_root = crop_zarr_from_masks(
+            fft_features, primary_mask, crop_output_path, **ckw,
+        )
+
+        # Attach per-cell extracted stats from DataFrame to each cell group
+        logger.info("Attaching extracted cell data to crop zarr groups...")
+        for cell_key in crop_root.group_keys():
+            cell_group = crop_root[cell_key]
+            label_id = cell_group.attrs.get("label_id", None)
+            if label_id is not None and label_id in df["cell_id"].values:
+                row = df[df["cell_id"] == label_id].iloc[0]
+                extracted = {}
+                for col in row.index:
+                    if col in ("cell_id", "image_filename", "mask_filename"):
+                        continue
+                    val = row[col]
+                    # Convert numpy types to Python builtins for zarr attrs
+                    if hasattr(val, "item"):
+                        val = val.item()
+                    extracted[col] = val
+                for k, v in _sanitize_metadata(extracted).items():
+                    try:
+                        cell_group.attrs[f"extracted_{k}"] = v
+                    except Exception as e:
+                        logger.warning(f"Could not attach attr {k} to {cell_key}: {e}")
+
+    # --- Return ---
+    out = [df]
+    if return_fft_features:
+        out.append(fft_features)
+    if crop_zarrs:
+        out.append(crop_root)
+    return out[0] if len(out) == 1 else tuple(out)
 
 
 def process_folder_cellstreams(images_directory, masks_directory, **kwargs):
@@ -201,7 +258,8 @@ def process_folder_cellstreams(images_directory, masks_directory, **kwargs):
                     masks_filename=masks_filename,
                     **kwargs,
                 )
-                data.append(pos_data_for_image)
+                df_part = pos_data_for_image[0] if isinstance(pos_data_for_image, tuple) else pos_data_for_image
+                data.append(df_part)
 
             except Exception as e:
                 logger.error(f"Error processing {image_filename}: {e}")
