@@ -168,7 +168,12 @@ def process_cwt_image_cellstreams(
         # Attach per-cell extracted stats from DataFrame to each cell group
         if not df.empty:
             logger.info("Attaching extracted CWT cell data to crop zarr groups...")
-            for cell_key in crop_root.group_keys():
+            keys = list(crop_root.group_keys())
+            if ckw.get("show_progress", False):
+                from tqdm.auto import tqdm
+                keys = tqdm(keys, desc="Attaching CWT metadata", leave=False)
+            
+            for cell_key in keys:
                 cell_group = crop_root[cell_key]
                 label_id = cell_group.attrs.get("label_id", None)
                 if label_id is not None and label_id in df["cell_id"].values:
