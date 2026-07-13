@@ -168,6 +168,16 @@ def process_cwt_image_cellstreams(
         # Attach per-cell extracted stats from DataFrame to each cell group
         if not df.empty:
             logger.info("Attaching extracted CWT cell data to crop zarr groups...")
+            
+            # Pre-aggregate temporal stats for all cells to make metadata attachment lightning fast
+            grouped = df.groupby(["cell_id", "channel", "feature", "filter_bank"])[["mean", "std"]].mean().reset_index()
+            cell_summary = {}
+            for _, row in grouped.iterrows():
+                cid = row["cell_id"]
+                key = f"ch{row['channel']}_{row['feature']}_bank{row['filter_bank']}"
+                cell_summary.setdefault(cid, {})[f"{key}_mean"] = row["mean"]
+                cell_summary[cid][f"{key}_std"] = row["std"]
+
             keys = list(crop_root.group_keys())
             if ckw.get("show_progress", False):
                 from tqdm.auto import tqdm
@@ -176,20 +186,8 @@ def process_cwt_image_cellstreams(
             for cell_key in keys:
                 cell_group = crop_root[cell_key]
                 label_id = cell_group.attrs.get("label_id", None)
-                if label_id is not None and label_id in df["cell_id"].values:
-                    cell_rows = df[df["cell_id"] == label_id]
-                    # Summarise: for each (channel, feature, filter_bank), store mean and std
-                    summary = {}
-                    for _, row in cell_rows.iterrows():
-                        key = f"ch{row['channel']}_{row['feature']}_bank{row['filter_bank']}"
-                        mean_val = row["mean"]
-                        std_val = row["std"]
-                        if hasattr(mean_val, "item"):
-                            mean_val = mean_val.item()
-                        if hasattr(std_val, "item"):
-                            std_val = std_val.item()
-                        summary[f"{key}_mean"] = mean_val
-                        summary[f"{key}_std"] = std_val
+                if label_id is not None and label_id in cell_summary:
+                    summary = cell_summary[label_id].copy()
                         
                     # Add raw expression means
                     if label_id in raw_means:
