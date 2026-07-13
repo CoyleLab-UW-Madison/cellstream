@@ -49,6 +49,7 @@ result = cellstream.cwt.process_cwt_image_cellstreams(
     
     ### zarr cropping options
     crop_zarrs=True,
+    return_timeseries=True,
     crop_output_path="cwt_example_crops.zarr",
     crop_kwargs={"padding_fraction": 0.2, "show_progress": True}
 )

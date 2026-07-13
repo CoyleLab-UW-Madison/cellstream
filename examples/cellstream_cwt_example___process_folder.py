@@ -43,7 +43,8 @@ data = cellstream.cwt.process_folder_cwt_cellstreams(
     
     ### zarr cropping options
     crop_zarrs=True,
-    crop_kwargs={"padding_fraction": 0.2, "show_progress": True}
+    return_timeseries=True,
+    crop_kwargs={"padding_fraction": 0.2, "show_progress": False}
 )
 
 print("\n--- Folder Processing Complete ---")

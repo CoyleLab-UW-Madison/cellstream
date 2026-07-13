@@ -33,6 +33,7 @@ data = cellstream.fft.process_folder_cellstreams(
     ### Output control
     channel_names=["minE", "minD"],
     return_fft_features=False,
+    return_timeseries=True,
     crop_zarrs=True 
     # downsample_by=0.25
 )
