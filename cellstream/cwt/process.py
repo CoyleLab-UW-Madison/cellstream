@@ -73,6 +73,7 @@ def process_cwt_image_cellstreams(
     
     # Compile results into a tidy/long-form dataframe using vectorized ops
     dfs = []
+    fast_cell_summary = {}
     
     for ch_key, features_dict in cwt_features.items():
         if ch_key == "_attrs" or not isinstance(features_dict, dict):
@@ -86,6 +87,17 @@ def process_cwt_image_cellstreams(
             
             num_cells, num_banks, T_len = means_np.shape
             
+            # --- FAST METADATA EXTRACTION ---
+            # Pre-compute temporal means instantly from the tensors for Zarr .attrs
+            temp_mean = means_np.mean(axis=-1)
+            temp_std = stds_np.mean(axis=-1)
+            for c_idx in range(num_cells):
+                for b_idx in range(num_banks):
+                    key = f"ch{ch_key}_{feat_key}_bank{b_idx}"
+                    fast_cell_summary.setdefault(c_idx, {})[f"{key}_mean"] = temp_mean[c_idx, b_idx]
+                    fast_cell_summary[c_idx][f"{key}_std"] = temp_std[c_idx, b_idx]
+            
+            # --- LONG DATAFRAME BUILD ---
             # Grid of coordinates
             cell_ids, bank_indices, frames = np.meshgrid(
                 np.arange(num_cells),
@@ -166,18 +178,8 @@ def process_cwt_image_cellstreams(
                     raw_means.setdefault(cid, {})["raw_ch0_mean"] = float(means_c[i])
 
         # Attach per-cell extracted stats from DataFrame to each cell group
-        if not df.empty:
+        if len(fast_cell_summary) > 0:
             logger.info("Attaching extracted CWT cell data to crop zarr groups...")
-            
-            # Pre-aggregate temporal stats for all cells to make metadata attachment lightning fast
-            grouped = df.groupby(["cell_id", "channel", "feature", "filter_bank"])[["mean", "std"]].mean().reset_index()
-            cell_summary = {}
-            for _, row in grouped.iterrows():
-                cid = row["cell_id"]
-                key = f"ch{row['channel']}_{row['feature']}_bank{row['filter_bank']}"
-                cell_summary.setdefault(cid, {})[f"{key}_mean"] = row["mean"]
-                cell_summary[cid][f"{key}_std"] = row["std"]
-
             keys = list(crop_root.group_keys())
             if ckw.get("show_progress", False):
                 from tqdm.auto import tqdm
@@ -186,18 +188,20 @@ def process_cwt_image_cellstreams(
             for cell_key in keys:
                 cell_group = crop_root[cell_key]
                 label_id = cell_group.attrs.get("label_id", None)
-                if label_id is not None and label_id in cell_summary:
-                    summary = cell_summary[label_id].copy()
+                if label_id is not None and label_id in fast_cell_summary:
+                    summary = fast_cell_summary[label_id].copy()
                         
                     # Add raw expression means
                     if label_id in raw_means:
                         summary.update(raw_means[label_id])
                         
-                    for k, v in _sanitize_metadata(summary).items():
-                        try:
-                            cell_group.attrs[f"extracted_{k}"] = v
-                        except Exception as e:
-                            logger.warning(f"Could not attach attr {k} to {cell_key}: {e}")
+                    try:
+                        # Batch update the Zarr attributes in a single disk IO write
+                        cell_group.attrs.update({
+                            f"extracted_{k}": v for k, v in _sanitize_metadata(summary).items()
+                        })
+                    except Exception as e:
+                        logger.warning(f"Could not attach attributes to {cell_key}: {e}")
 
     # --- Return ---
     if crop_zarrs:

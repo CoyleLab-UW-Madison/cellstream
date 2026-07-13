@@ -198,11 +198,13 @@ def process_image_cellstreams(
                     if hasattr(val, "item"):
                         val = val.item()
                     extracted[col] = val
-                for k, v in _sanitize_metadata(extracted).items():
-                    try:
-                        cell_group.attrs[f"extracted_{k}"] = v
-                    except Exception as e:
-                        logger.warning(f"Could not attach attr {k} to {cell_key}: {e}")
+                try:
+                    # Batch update the Zarr attributes in a single disk IO write
+                    cell_group.attrs.update({
+                        f"extracted_{k}": v for k, v in _sanitize_metadata(extracted).items()
+                    })
+                except Exception as e:
+                    logger.warning(f"Could not attach attributes to {cell_key}: {e}")
 
     # --- Return ---
     out = [df]
