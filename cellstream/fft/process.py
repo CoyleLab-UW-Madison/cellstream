@@ -165,7 +165,8 @@ def process_image_cellstreams(
 
         # Ensure mask is 2-D for crop_zarr_from_masks
         if primary_mask.dim() > 2:
-            primary_mask = primary_mask[0]
+            while primary_mask.dim() > 2:
+                primary_mask = primary_mask.max(dim=0).values if hasattr(primary_mask.max(dim=0), 'values') else primary_mask.max(dim=0)[0] if isinstance(primary_mask.max(dim=0), tuple) else primary_mask.max(dim=0)
 
         # Add the raw image to the cropped features
         if "raw_timeseries" not in fft_features:

@@ -131,10 +131,10 @@ def process_cwt_image_cellstreams(
         masks_2d = masks
         if hasattr(masks_2d, 'dim'):
             while masks_2d.dim() > 2:
-                masks_2d = masks_2d[0]
+                masks_2d = masks_2d.max(dim=0).values if hasattr(masks_2d.max(dim=0), 'values') else masks_2d.max(dim=0)[0] if isinstance(masks_2d.max(dim=0), tuple) else masks_2d.max(dim=0)
         elif hasattr(masks_2d, 'ndim'):
             while masks_2d.ndim > 2:
-                masks_2d = masks_2d[0]
+                masks_2d = masks_2d.max(axis=0)
                 
         # Add the raw image to the cropped features
         if "raw_timeseries" not in cwt_features:

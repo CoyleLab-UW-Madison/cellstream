@@ -155,6 +155,9 @@ def _sanitize_metadata(val):
     elif isinstance(val, (list, tuple)):
         return [_sanitize_metadata(item) for item in val]
     elif isinstance(val, (int, float, str, bool)) or val is None:
+        import math
+        if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
+            return None
         return val
     else:
         return str(val)
