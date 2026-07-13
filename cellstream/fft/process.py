@@ -167,6 +167,10 @@ def process_image_cellstreams(
         if primary_mask.dim() > 2:
             primary_mask = primary_mask[0]
 
+        # Add the raw image to the cropped features
+        if "raw_timeseries" not in fft_features:
+            fft_features["raw_timeseries"] = image
+
         logger.info(f"Cropping features to per-cell zarr at {crop_output_path}...")
         crop_root = crop_zarr_from_masks(
             fft_features, primary_mask, crop_output_path, **ckw,

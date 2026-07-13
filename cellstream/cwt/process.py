@@ -135,11 +135,35 @@ def process_cwt_image_cellstreams(
         elif hasattr(masks_2d, 'ndim'):
             while masks_2d.ndim > 2:
                 masks_2d = masks_2d[0]
+                
+        # Add the raw image to the cropped features
+        if "raw_timeseries" not in cwt_features:
+            cwt_features["raw_timeseries"] = image
 
         logger.info(f"Cropping CWT features to per-cell zarr at {crop_output_path}...")
         crop_root = crop_zarr_from_masks(
             cwt_features, masks_2d, crop_output_path, **ckw,
         )
+        
+        # Calculate raw expression means
+        import scipy.ndimage as ndi
+        img_np = image.detach().cpu().numpy() if hasattr(image, "detach") else np.asarray(image)
+        masks_2d_np = masks_2d.detach().cpu().numpy() if hasattr(masks_2d, "detach") else np.asarray(masks_2d)
+        
+        raw_means = {}
+        cell_ids = df["cell_id"].unique() if not df.empty else []
+        if len(cell_ids) > 0:
+            if img_np.ndim == 4: # C, T, Y, X
+                time_avg = img_np.mean(axis=1) # C, Y, X
+                for c in range(time_avg.shape[0]):
+                    means_c = ndi.mean(time_avg[c], labels=masks_2d_np, index=cell_ids)
+                    for i, cid in enumerate(cell_ids):
+                        raw_means.setdefault(cid, {})[f"raw_ch{c}_mean"] = float(means_c[i])
+            elif img_np.ndim == 3: # T, Y, X
+                time_avg = img_np.mean(axis=0) # Y, X
+                means_c = ndi.mean(time_avg, labels=masks_2d_np, index=cell_ids)
+                for i, cid in enumerate(cell_ids):
+                    raw_means.setdefault(cid, {})["raw_ch0_mean"] = float(means_c[i])
 
         # Attach per-cell extracted stats from DataFrame to each cell group
         if not df.empty:
@@ -161,6 +185,11 @@ def process_cwt_image_cellstreams(
                             std_val = std_val.item()
                         summary[f"{key}_mean"] = mean_val
                         summary[f"{key}_std"] = std_val
+                        
+                    # Add raw expression means
+                    if label_id in raw_means:
+                        summary.update(raw_means[label_id])
+                        
                     for k, v in _sanitize_metadata(summary).items():
                         try:
                             cell_group.attrs[f"extracted_{k}"] = v
