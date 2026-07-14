@@ -94,8 +94,8 @@ def process_cwt_image_cellstreams(
             for c_idx in range(num_cells):
                 for b_idx in range(num_banks):
                     key = f"ch{ch_key}_{feat_key}_bank{b_idx}"
-                    fast_cell_summary.setdefault(c_idx, {})[f"{key}_mean"] = temp_mean[c_idx, b_idx]
-                    fast_cell_summary[c_idx][f"{key}_std"] = temp_std[c_idx, b_idx]
+                    fast_cell_summary.setdefault(c_idx, {})[f"{key}_mean"] = temp_mean[c_idx, b_idx].item()
+                    fast_cell_summary[c_idx][f"{key}_std"] = temp_std[c_idx, b_idx].item()
             
             # --- LONG DATAFRAME BUILD ---
             # Grid of coordinates
