@@ -90,9 +90,13 @@ def phase_velocity(phase, epsilon=1e-4, smooth_sigma=None, device='cpu', row_blo
         z_center = z_slice[:, 1:-1, 1:-1, 1:-1]
         z_conj = z_center.conj()
         
-        dphi_dx = (z_conj * dz_dx).imag
-        dphi_dy = (z_conj * dz_dy).imag
-        dphi_dt = (z_conj * dz_dt).imag
+        # Divide by R^2 to get the true phase gradient of the smoothed complex field
+        # R^2 = |Z|^2 = Z * Z_conj
+        R2 = (z_center * z_conj).real + 1e-8
+        
+        dphi_dx = (z_conj * dz_dx).imag / R2
+        dphi_dy = (z_conj * dz_dy).imag / R2
+        dphi_dt = (z_conj * dz_dt).imag / R2
         
         grad_sq = dphi_dx**2 + dphi_dy**2 + epsilon
         
