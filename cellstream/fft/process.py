@@ -54,6 +54,7 @@ def process_image_cellstreams(
     crop_zarrs=False,
     crop_output_path=None,
     crop_kwargs=None,
+    dataframe_output_path=None,
     **kwargs,
 ):
     """
@@ -206,6 +207,17 @@ def process_image_cellstreams(
                 except Exception as e:
                     logger.warning(f"Could not attach attributes to {cell_key}: {e}")
 
+    # --- Save DataFrame ---
+    if dataframe_output_path is not None:
+        ext = os.path.splitext(dataframe_output_path)[1].lower()
+        if ext == ".parquet":
+            df.to_parquet(dataframe_output_path)
+        elif ext in [".csv", ".txt"]:
+            df.to_csv(dataframe_output_path, index=False)
+        else:
+            logger.warning(f"Unsupported extension {ext} for dataframe_output_path. Defaulting to CSV.")
+            df.to_csv(f"{dataframe_output_path}.csv", index=False)
+
     # --- Return ---
     out = [df]
     if return_fft_features:
@@ -215,7 +227,7 @@ def process_image_cellstreams(
     return out[0] if len(out) == 1 else tuple(out)
 
 
-def process_folder_cellstreams(images_directory, masks_directory, **kwargs):
+def process_folder_cellstreams(images_directory, masks_directory, dataframe_output_path=None, **kwargs):
     """
     Batch process all images and masks in a folder using FFT feature extraction.
 
@@ -276,7 +288,19 @@ def process_folder_cellstreams(images_directory, masks_directory, **kwargs):
             except Exception as e:
                 logger.error(f"Error processing {image_filename}: {e}")
     if not data:
-        return pd.DataFrame()
-    data = pd.concat(data, ignore_index=True)
-    return data
+        df = pd.DataFrame()
+    else:
+        df = pd.concat(data, ignore_index=True)
+
+    if dataframe_output_path is not None:
+        ext = os.path.splitext(dataframe_output_path)[1].lower()
+        if ext == ".parquet":
+            df.to_parquet(dataframe_output_path)
+        elif ext in [".csv", ".txt"]:
+            df.to_csv(dataframe_output_path, index=False)
+        else:
+            logger.warning(f"Unsupported extension {ext} for dataframe_output_path. Defaulting to CSV.")
+            df.to_csv(f"{dataframe_output_path}.csv", index=False)
+            
+    return df
 

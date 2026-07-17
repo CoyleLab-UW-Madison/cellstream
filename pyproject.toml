@@ -14,7 +14,8 @@ dependencies = [
     "nd2",
     "tqdm",
     "ssqueezepy",
-    "zarr"
+    "zarr",
+    "pyarrow"
 ]
 
 [project.optional-dependencies]

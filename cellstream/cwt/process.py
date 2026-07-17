@@ -38,6 +38,7 @@ def process_cwt_image_cellstreams(
     crop_zarrs=False,
     crop_output_path=None,
     crop_kwargs=None,
+    dataframe_output_path=None,
     **ssqueezepy_cwt_kwargs,
 ):
     """
@@ -203,12 +204,23 @@ def process_cwt_image_cellstreams(
                     except Exception as e:
                         logger.warning(f"Could not attach attributes to {cell_key}: {e}")
 
+    # --- Save DataFrame ---
+    if dataframe_output_path is not None:
+        ext = os.path.splitext(dataframe_output_path)[1].lower()
+        if ext == ".parquet":
+            df.to_parquet(dataframe_output_path)
+        elif ext in [".csv", ".txt"]:
+            df.to_csv(dataframe_output_path, index=False)
+        else:
+            logger.warning(f"Unsupported extension {ext} for dataframe_output_path. Defaulting to CSV.")
+            df.to_csv(f"{dataframe_output_path}.csv", index=False)
+
     # --- Return ---
     if crop_zarrs:
         return (df, crop_root)
     return df
 
-def process_folder_cwt_cellstreams(images_directory, masks_directory, **kwargs):
+def process_folder_cwt_cellstreams(images_directory, masks_directory, dataframe_output_path=None, **kwargs):
     """
     Batch process all images and masks in a folder using CWT feature extraction.
     """
@@ -256,6 +268,18 @@ def process_folder_cwt_cellstreams(images_directory, masks_directory, **kwargs):
                 logger.error(f"Error processing {image_filename}: {e}")
                 
     if not data:
-        return pd.DataFrame()
+        df = pd.DataFrame()
+    else:
+        df = pd.concat(data, ignore_index=True)
         
-    return pd.concat(data, ignore_index=True)
+    if dataframe_output_path is not None:
+        ext = os.path.splitext(dataframe_output_path)[1].lower()
+        if ext == ".parquet":
+            df.to_parquet(dataframe_output_path)
+        elif ext in [".csv", ".txt"]:
+            df.to_csv(dataframe_output_path, index=False)
+        else:
+            logger.warning(f"Unsupported extension {ext} for dataframe_output_path. Defaulting to CSV.")
+            df.to_csv(f"{dataframe_output_path}.csv", index=False)
+            
+    return df
