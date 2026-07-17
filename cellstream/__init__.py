@@ -23,6 +23,8 @@ from . import cwt
 from . import stft
 from . import hilbert
 from . import filters
+from . import flow
+from .flow import phase_velocity, binned_piv_velocity
 from . import registration
 from . import phase
 from . import pixels
