@@ -121,100 +121,110 @@ def generate_streamlines(
     decay: float = 0.85, 
     velocity_multiplier: float = 1.0,
     device: str = 'cpu',
-    mask: torch.Tensor = None
+    mask: torch.Tensor = None,
+    inject_rate: float = 0.05
 ):
     """
     Generate a dense (T, Y, X) image stack of glowing particle streamlines
-    traced through the velocity field using Euler integration.
+    traced through the velocity field using Euler integration with continuous
+    particle injection.
     
     Args:
-        velocity: (T, 2, Y, X) tensor of phase velocity [t, vx, vy]
-        num_particles: Number of virtual tracer particles to simulate
-        decay: Persistence of the comet tails [0.0 - 1.0]
+        velocity: (T, 2, Y, X) tensor of phase velocity
+        num_particles: Target number of tracer particles
+        decay: Persistence of comet tails [0.0 - 1.0]
         velocity_multiplier: Scale particle speeds
         device: 'cpu' or 'cuda'
+        mask: Optional (T, Y, X) or (Y, X) mask tensor
+        inject_rate: Fraction of num_particles to inject per frame
         
     Returns:
         images: (T, Y, X) image tensor of glowing particle traces
     """
     velocity = velocity.to(device)
     T, _, H, W = velocity.shape
+    max_particles = num_particles * 2
+    inject_per_frame = max(1, int(num_particles * inject_rate))
     
     if mask is not None:
         mask = mask.to(device)
-        # Collapse time dimension if present to find all possible valid spatial locations
         spatial_mask = mask.max(dim=0)[0] if mask.ndim == 3 else mask
         valid_y, valid_x = torch.where(spatial_mask > 0)
         num_valid = len(valid_y)
         if num_valid == 0:
             mask = None
             
-    def respawn_particles(n):
+    def spawn_particles(n):
         if mask is not None:
             idx = torch.randint(0, num_valid, (n,), device=device)
             py = valid_y[idx].float()
             px = valid_x[idx].float()
-            # Convert to [-1, 1] range
             px = px / (W - 1) * 2 - 1
             py = py / (H - 1) * 2 - 1
-            # Add sub-pixel jitter
             px += (torch.rand(n, device=device) - 0.5) * 2 / W
             py += (torch.rand(n, device=device) - 0.5) * 2 / H
             return torch.stack([px, py], dim=1)
         else:
             return (torch.rand((n, 2), device=device, dtype=torch.float32) * 2 - 1)
             
-    # Initialize random particle coordinates
-    particles = respawn_particles(num_particles)
+    # Seed initial population
+    particles = spawn_particles(num_particles)
     
     images = torch.zeros((T, H, W), device=device, dtype=torch.float32)
     canvas = torch.zeros((H, W), device=device, dtype=torch.float32)
     
-    # Pre-compute pixel-to-grid coordinate scaling
     vel_scale = torch.tensor([2.0/(W-1), 2.0/(H-1)], device=device).view(1, 2)
     vel_scale = vel_scale * velocity_multiplier
     
     for t in range(T):
-        # Decay previous comet tails
         canvas = canvas * decay
         
-        v_t = velocity[t:t+1] # (1, 2, H, W)
+        n = particles.shape[0]
+        if n == 0:
+            # All particles died, re-seed
+            particles = spawn_particles(num_particles)
+            n = num_particles
         
-        # grid_sample expects (N, H_out, W_out, 2) where the last dim is (x, y)
-        grid_coords = particles.view(1, 1, num_particles, 2)
+        v_t = velocity[t:t+1]
+        grid_coords = particles.view(1, 1, n, 2)
         
-        # Interpolate the velocity vector exactly at each particle's current floating-point position
         v_sampled = F.grid_sample(v_t, grid_coords, mode='bilinear', padding_mode='zeros', align_corners=True)
-        v_sampled = v_sampled.view(2, num_particles).t() # (num_particles, 2)
+        v_sampled = v_sampled.view(2, n).t()
         
-        # Move particles (Euler step)
+        # Euler step
         particles = particles + v_sampled * vel_scale
         
-        # Check out of bounds
-        out_of_bounds = (particles[:, 0] < -1) | (particles[:, 0] > 1) | \
-                        (particles[:, 1] < -1) | (particles[:, 1] > 1)
-                        
+        # Check bounds at updated position
+        alive = (particles[:, 0] >= -1) & (particles[:, 0] <= 1) & \
+                (particles[:, 1] >= -1) & (particles[:, 1] <= 1)
+                
         if mask is not None:
-            grid_coords = particles.view(1, 1, num_particles, 2)
+            grid_coords_updated = particles.view(1, 1, n, 2)
             mask_t = mask[t:t+1] if mask.ndim == 3 else mask.unsqueeze(0)
             mask_t = mask_t.unsqueeze(0).float()
-            m_sampled = F.grid_sample(mask_t, grid_coords, mode='nearest', padding_mode='zeros', align_corners=True)
-            out_of_bounds = out_of_bounds | (m_sampled.view(num_particles) < 0.5)
-                        
-        if out_of_bounds.any():
-            n_out = out_of_bounds.sum().item()
-            particles[out_of_bounds] = respawn_particles(n_out)
-            
-        # Rasterize particles onto the pixel grid
-        px = ((particles[:, 0] + 1) / 2 * (W - 1)).round().long()
-        py = ((particles[:, 1] + 1) / 2 * (H - 1)).round().long()
+            m_sampled = F.grid_sample(mask_t, grid_coords_updated, mode='nearest', padding_mode='zeros', align_corners=True)
+            alive = alive & (m_sampled.view(n) >= 0.5)
         
-        px = torch.clamp(px, 0, W - 1)
-        py = torch.clamp(py, 0, H - 1)
+        # Kill dead particles (don't respawn)
+        particles = particles[alive]
         
-        # Draw onto canvas (accumulate brightness)
-        canvas.index_put_((py, px), torch.tensor(1.0, device=device), accumulate=True)
-        canvas = torch.clamp(canvas, 0, 1.0)
+        # Rasterize surviving particles
+        n_alive = particles.shape[0]
+        if n_alive > 0:
+            px = ((particles[:, 0] + 1) / 2 * (W - 1)).round().long()
+            py = ((particles[:, 1] + 1) / 2 * (H - 1)).round().long()
+            px = torch.clamp(px, 0, W - 1)
+            py = torch.clamp(py, 0, H - 1)
+            canvas.index_put_((py, px), torch.tensor(1.0, device=device), accumulate=True)
+            canvas = torch.clamp(canvas, 0, 1.0)
+        
+        # Inject fresh particles
+        new_particles = spawn_particles(inject_per_frame)
+        particles = torch.cat([particles, new_particles], dim=0)
+        
+        # Cap total to prevent unbounded growth
+        if particles.shape[0] > max_particles:
+            particles = particles[:max_particles]
         
         images[t] = canvas
     return images
