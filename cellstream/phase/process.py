@@ -159,12 +159,17 @@ def process_zarr_store(zarr_path: str, force: bool = False, **kwargs):
     logger.info(f"Opening Zarr store: {zarr_path}")
     store = zarr.open(zarr_path, mode='a')
     
-    if 'cells' not in store:
-        logger.error("Store does not contain a 'cells' group.")
-        return
-        
-    cells_group = store['cells']
-    cell_ids = list(cells_group.keys())
+    if 'cells' in store:
+        cells_group = store['cells']
+        cell_ids = list(cells_group.keys())
+    else:
+        # Fallback to checking if cells are at the root
+        cell_ids = [k for k in store.keys() if k.startswith('cell_')]
+        if not cell_ids:
+            logger.error("Store does not contain a 'cells' group or any 'cell_' root groups.")
+            return
+        cells_group = store
+
     logger.info(f"Found {len(cell_ids)} cells.")
     
     for cell_id in tqdm(cell_ids, desc="Processing phase features"):
