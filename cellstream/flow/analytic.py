@@ -198,7 +198,7 @@ def generate_streamlines(
             mask_t = mask[t:t+1] if mask.ndim == 3 else mask.unsqueeze(0)
             mask_t = mask_t.unsqueeze(0).float()
             m_sampled = F.grid_sample(mask_t, grid_coords, mode='nearest', padding_mode='zeros', align_corners=True)
-            out_of_bounds = out_of_bounds | (m_sampled.view(num_particles) == 0)
+            out_of_bounds = out_of_bounds | (m_sampled.view(num_particles) < 0.5)
                         
         if out_of_bounds.any():
             n_out = out_of_bounds.sum().item()
@@ -212,8 +212,10 @@ def generate_streamlines(
         py = torch.clamp(py, 0, H - 1)
         
         # Draw onto canvas (accumulate brightness)
-        images[t] = canvas
+        canvas.index_put_((py, px), torch.tensor(1.0, device=device), accumulate=True)
+        canvas = torch.clamp(canvas, 0, 1.0)
         
+        images[t] = canvas
     return images
 
 def generate_instantaneous_streamlines(
@@ -282,7 +284,7 @@ def generate_instantaneous_streamlines(
                             
             if mask_t is not None:
                 m_sampled = F.grid_sample(mask_t, grid_coords, mode='nearest', padding_mode='zeros', align_corners=True)
-                out_of_bounds = out_of_bounds | (m_sampled.view(num_particles) == 0)
+                out_of_bounds = out_of_bounds | (m_sampled.view(num_particles) < 0.5)
                 
             # For static streamlines, we don't necessarily respawn, we just stop drawing them.
             # But to keep density even, we can respawn out-of-bounds particles!
@@ -295,8 +297,10 @@ def generate_instantaneous_streamlines(
             px = torch.clamp(px, 0, W - 1)
             py = torch.clamp(py, 0, H - 1)
             
-            canvas.index_put_((py, px), torch.tensor(1.0, device=device), accumulate=False)
+            # Draw onto canvas
+            # Using accumulate=True avoids undefined behavior on GPU with duplicate coordinates
+            canvas.index_put_((py, px), torch.tensor(1.0, device=device), accumulate=True)
             
-        images[t] = canvas
+        images[t] = torch.clamp(canvas, 0, 1.0)
         
     return images
