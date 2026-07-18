@@ -107,7 +107,7 @@ def phase_velocity(phase, epsilon=1e-4, smooth_sigma=None, device='cpu', row_blo
         velocity[:, :, 0, row_start:row_end, :] = vx
         velocity[:, :, 1, row_start:row_end, :] = vy
         speed[:, :, row_start:row_end, :] = torch.sqrt(vx**2 + vy**2)
-        wavenumber[:, :, row_start:row_end, :] = torch.sqrt(grad_sq)
+        wavenumber[:, :, row_start:row_end, :] = torch.sqrt(dphi_dx**2 + dphi_dy**2)
         
     velocity = velocity.reshape(original_shape[:-3] + (T, 2, H, W))
     speed = speed.reshape(original_shape[:-3] + (T, H, W))
