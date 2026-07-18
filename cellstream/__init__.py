@@ -56,7 +56,6 @@ __all__ = [
     "pixels",
     "experimental",
     "spatial",
-    "features",
     "load_image",
     "load_masks",
     "load_zarr",

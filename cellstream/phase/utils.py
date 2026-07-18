@@ -1,11 +1,13 @@
 """
-cellstream.phase
+cellstream.phase.utils
 
-Phase analysis utilities, including winding number computation for topological charge.
+Phase analysis utilities: winding number (topological charge) computation
+and unified phase-field feature generation (defects, velocity, FTLE).
 """
 
 import torch
 import torch.nn.functional as F
+import numpy as np
 from tqdm.auto import tqdm
 
 def winding_number(phase_img, n=5, mode="replicate", row_blocks=1, device='cpu'):
@@ -84,3 +86,80 @@ def winding_number(phase_img, n=5, mode="replicate", row_blocks=1, device='cpu')
 
     # Restore original shape
     return winding.reshape(original_shape)
+
+
+def generate_phase_features(
+    phase: torch.Tensor,
+    mask: torch.Tensor = None,
+    device: str = None,
+    ftle_integration_time: int = 20,
+    smooth_sigma: float = 1.0,
+    defect_window_size: int = 5,
+):
+    """
+    Generate all relevant features from a phase field (defects, velocity, FTLE).
+    
+    This is the phase-module analogue of ``fft.generate_fft_features`` — it takes
+    a raw phase tensor and returns a dictionary of derived feature arrays.  The
+    heavier Zarr I/O orchestration lives in ``phase.process``.
+    
+    Args:
+        phase: (T, Y, X) tensor of phase values.
+        mask: Optional (T, Y, X) or (Y, X) mask.
+        device: 'cuda', 'cpu', or None (auto-detect).
+        ftle_integration_time: Number of frames for FTLE integration.
+        smooth_sigma: Gaussian smoothing sigma for phase velocity.
+        defect_window_size: Kernel size for winding number computation (must be odd).
+        
+    Returns:
+        dict with keys:
+            - 'winding_number': (T, Y, X) float32 array
+            - 'velocity':       (T, 2, Y, X) float32 array
+            - 'speed':          (T, Y, X) float32 array
+            - 'ftle_forward':   (T, Y, X) float32 array
+            - 'ftle_backward':  (T, Y, X) float32 array
+    """
+    from ..flow.analytic import phase_velocity, compute_ftle
+
+    if device is None:
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+    phase = phase.to(device)
+    if mask is not None:
+        mask = mask.to(device)
+        
+    features = {}
+    
+    # 1. Defects (Winding Number Field)
+    wn = winding_number(phase, n=defect_window_size, device=device)
+    features['winding_number'] = wn.cpu().numpy()
+    
+    # 2. Phase Velocity
+    v, speed, _ = phase_velocity(phase, smooth_sigma=smooth_sigma, device=device)
+    features['velocity'] = v.cpu().numpy()
+    features['speed'] = speed.cpu().numpy()
+    
+    # 3. FTLE (Forward and Backward)
+    ftle_fwd = compute_ftle(
+        v, 
+        integration_time=ftle_integration_time, 
+        device=device, 
+        mask=mask, 
+        backward=False
+    )
+    features['ftle_forward'] = ftle_fwd.cpu().numpy()
+    
+    ftle_bwd = compute_ftle(
+        v, 
+        integration_time=ftle_integration_time, 
+        device=device, 
+        mask=mask, 
+        backward=True
+    )
+    features['ftle_backward'] = ftle_bwd.cpu().numpy()
+
+    # Free GPU memory if we used it
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    
+    return features

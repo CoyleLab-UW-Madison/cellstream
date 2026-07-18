@@ -1,11 +1,26 @@
 """
-cellstream.features
+cellstream.phase.process
 
-High-Level Feature Extraction Pipelines
+Batch processing pipelines for phase-field feature extraction.
 
-This module provides unified interfaces for extracting mathematical
-features (flow, defects, FTLE) from phase fields, cleanly separating
-the core math from Zarr data pipeline logic.
+Provides cell-level and store-level Zarr I/O orchestration that calls
+``generate_phase_features`` from ``phase.utils`` and writes the results
+into the appropriate Zarr groups.
+
+Expected Zarr layout written by ``process_cell``::
+
+    cell_group/
+        phase           # (T, Y, X) input — must already exist
+        mask            # (T, Y, X) optional input
+        defects/
+            winding_number   # (T, Y, X)
+            positive_coords  # (N, 3) — [t, y, x]
+            negative_coords  # (N, 3) — [t, y, x]
+        flow/
+            velocity         # (T, 2, Y, X)
+            speed            # (T, Y, X)
+            ftle_forward     # (T, Y, X)
+            ftle_backward    # (T, Y, X)
 """
 
 import logging
@@ -16,79 +31,29 @@ import numpy as np
 import zarr
 from tqdm.auto import tqdm
 
-from ..flow.analytic import phase_velocity, compute_ftle
-from .utils import winding_number
-
-def generate_phase_features(
-    phase: torch.Tensor,
-    mask: torch.Tensor = None,
-    device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
-    ftle_integration_time: int = 20,
-    smooth_sigma: float = 1.0,
-    defect_window_size: int = 5,
-):
-    """
-    Generate all relevant features from a phase field (defects, flow, FTLE).
-    
-    Args:
-        phase: (T, Y, X) tensor of phase values
-        mask: Optional (T, Y, X) or (Y, X) mask
-        device: 'cuda' or 'cpu'
-        ftle_integration_time: frames for FTLE integration
-        smooth_sigma: smoothing for phase velocity
-        defect_window_size: kernel size for winding number computation
-        
-    Returns:
-        dict containing the generated feature tensors (moved to CPU as numpy arrays)
-    """
-    phase = phase.to(device)
-    if mask is not None:
-        mask = mask.to(device)
-        
-    features = {}
-    
-    # 1. Defects (Winding Number Field)
-    # Winding number mathematically produces blocky "fields" around singularities
-    wn = winding_number(phase, n=defect_window_size, device=device)
-    features['winding_number'] = wn.cpu().numpy()
-    
-    # 2. Phase Velocity
-    v, speed, _ = phase_velocity(phase, smooth_sigma=smooth_sigma, device=device)
-    features['velocity'] = v.cpu().numpy()
-    features['speed'] = speed.cpu().numpy()
-    
-    # 3. FTLE (Forward and Backward)
-    ftle_fwd = compute_ftle(
-        v, 
-        integration_time=ftle_integration_time, 
-        device=device, 
-        mask=mask, 
-        backward=False
-    )
-    features['ftle_forward'] = ftle_fwd.cpu().numpy()
-    
-    ftle_bwd = compute_ftle(
-        v, 
-        integration_time=ftle_integration_time, 
-        device=device, 
-        mask=mask, 
-        backward=True
-    )
-    features['ftle_backward'] = ftle_bwd.cpu().numpy()
-    
-    return features
+from .utils import generate_phase_features
 
 
 def process_cell(
     cell_group: zarr.Group,
-    device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
+    device: str = None,
     force_recompute: bool = False,
     **kwargs
 ):
     """
-    Process a single cell's phase data, attaching generated features
-    back into the cell's Zarr group.
+    Process a single cell's phase data and write derived features into
+    the cell's Zarr group.
+
+    Args:
+        cell_group: Zarr group containing at least a 'phase' array.
+        device: 'cuda', 'cpu', or None (auto-detect).
+        force_recompute: If True, overwrite existing results.
+        **kwargs: Forwarded to ``generate_phase_features``
+                  (ftle_integration_time, smooth_sigma, defect_window_size).
     """
+    if device is None:
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
     if 'phase' not in cell_group:
         logger.info(f"Skipping {cell_group.name}: No 'phase' array found.")
         return
@@ -105,14 +70,23 @@ def process_cell(
     mask = None
     if 'mask' in cell_group:
         mask = torch.from_numpy(cell_group['mask'][:].astype('float32'))
-        
+
+    # Validate shape — process_cell expects (T, Y, X)
+    if phase.ndim != 3:
+        logger.warning(
+            f"Skipping {cell_group.name}: expected 3-D phase (T, Y, X), "
+            f"got shape {tuple(phase.shape)}"
+        )
+        return
+
     # Generate unified features
     features = generate_phase_features(phase, mask=mask, device=device, **kwargs)
     
-    # Write Defects
+    # --- Write Defects ---
+    wn_np = features['winding_number']
+
     if 'winding_number' in defects_group:
         del defects_group['winding_number']
-    wn_np = features['winding_number']
     defects_group.create_dataset(
         'winding_number', 
         data=wn_np, 
@@ -120,48 +94,56 @@ def process_cell(
         compressor=zarr.Blosc(cname='zstd', clevel=3, shuffle=1)
     )
     
-    # Extract coordinates as a convenience
+    # Extract defect coordinates as a convenience table
     T = wn_np.shape[0]
-    pos_defects_list = []
-    neg_defects_list = []
-    for t in range(T):
+    t_indices = np.arange(T)
+    pos_lists = []
+    neg_lists = []
+    for t in t_indices:
         pos_y, pos_x = np.where(wn_np[t] > 0.5)
         neg_y, neg_x = np.where(wn_np[t] < -0.5)
-        pos_defects_list.append(np.stack([np.full_like(pos_y, t), pos_y, pos_x], axis=1))
-        neg_defects_list.append(np.stack([np.full_like(neg_y, t), neg_y, neg_x], axis=1))
+        if len(pos_y):
+            pos_lists.append(np.column_stack([np.full(len(pos_y), t), pos_y, pos_x]))
+        if len(neg_y):
+            neg_lists.append(np.column_stack([np.full(len(neg_y), t), neg_y, neg_x]))
         
-    pos_defects = np.concatenate(pos_defects_list, axis=0) if pos_defects_list else np.empty((0, 3))
-    neg_defects = np.concatenate(neg_defects_list, axis=0) if neg_defects_list else np.empty((0, 3))
+    pos_defects = np.concatenate(pos_lists, axis=0) if pos_lists else np.empty((0, 3), dtype=np.intp)
+    neg_defects = np.concatenate(neg_lists, axis=0) if neg_lists else np.empty((0, 3), dtype=np.intp)
     
-    if 'positive_coords' in defects_group:
-        del defects_group['positive_coords']
-    if 'negative_coords' in defects_group:
-        del defects_group['negative_coords']
+    for key in ('positive_coords', 'negative_coords'):
+        if key in defects_group:
+            del defects_group[key]
         
     defects_group.create_dataset('positive_coords', data=pos_defects)
     defects_group.create_dataset('negative_coords', data=neg_defects)
     
-    # Write Flow
-    for name in ['velocity', 'speed', 'ftle_forward', 'ftle_backward']:
-        if name in flow_group:
-            del flow_group[name]
-            
+    # --- Write Flow ---
     v_np = features['velocity']
     speed_np = features['speed']
     ftle_fwd_np = features['ftle_forward']
     ftle_bwd_np = features['ftle_backward']
-    
-    flow_group.create_dataset('velocity', data=v_np, chunks=(1, 2, v_np.shape[2], v_np.shape[3]))
-    flow_group.create_dataset('speed', data=speed_np, chunks=(1, speed_np.shape[1], speed_np.shape[2]))
-    flow_group.create_dataset('ftle_forward', data=ftle_fwd_np, chunks=(1, ftle_fwd_np.shape[1], ftle_fwd_np.shape[2]))
-    flow_group.create_dataset('ftle_backward', data=ftle_bwd_np, chunks=(1, ftle_bwd_np.shape[1], ftle_bwd_np.shape[2]))
 
-    torch.cuda.empty_cache()
+    for name in ('velocity', 'speed', 'ftle_forward', 'ftle_backward'):
+        if name in flow_group:
+            del flow_group[name]
+            
+    flow_group.create_dataset('velocity',      data=v_np,        chunks=(1, 2, v_np.shape[2], v_np.shape[3]))
+    flow_group.create_dataset('speed',          data=speed_np,    chunks=(1, speed_np.shape[1], speed_np.shape[2]))
+    flow_group.create_dataset('ftle_forward',   data=ftle_fwd_np, chunks=(1, ftle_fwd_np.shape[1], ftle_fwd_np.shape[2]))
+    flow_group.create_dataset('ftle_backward',  data=ftle_bwd_np, chunks=(1, ftle_bwd_np.shape[1], ftle_bwd_np.shape[2]))
+
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 
 def process_zarr_store(zarr_path: str, force: bool = False, **kwargs):
     """
     Iterate over all cells in a Zarr store and attach phase features.
+    
+    Args:
+        zarr_path: Path to the Zarr store (directory or .zip).
+        force: If True, recompute features even if they already exist.
+        **kwargs: Forwarded to ``process_cell`` / ``generate_phase_features``.
     """
     logger.info(f"Opening Zarr store: {zarr_path}")
     store = zarr.open(zarr_path, mode='a')
