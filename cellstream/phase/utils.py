@@ -119,7 +119,7 @@ def generate_phase_features(
             - 'ftle_forward':   (T, Y, X) float32 array
             - 'ftle_backward':  (T, Y, X) float32 array
     """
-    from ..flow.analytic import phase_velocity, compute_ftle
+    from .analytic import phase_velocity, compute_ftle
 
     if device is None:
         device = 'cuda' if torch.cuda.is_available() else 'cpu'

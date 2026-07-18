@@ -6,7 +6,7 @@ print("Testing imports...")
 try:
     from cellstream.phase import winding_number
     from cellstream.phase import generate_phase_features
-    from cellstream.flow import phase_velocity, compute_ftle
+    from cellstream.phase import phase_velocity, compute_ftle
     print("Imports successful!")
 except Exception as e:
     print(f"Import failed: {e}")
@@ -31,8 +31,15 @@ try:
     print("\nGenerated features:")
     for key, val in features.items():
         print(f" - {key}: shape {val.shape}, dtype {val.dtype}")
-        
+
+    # Verify top-level re-export
+    import cellstream
+    assert hasattr(cellstream, 'phase_velocity'), "phase_velocity not re-exported at top level"
+    assert not hasattr(cellstream, 'flow'), "flow module should not exist"
+    print("\nTop-level re-exports OK.")
+
     print("\nAll tests passed successfully!")
 except Exception as e:
     print(f"Execution failed: {e}")
+    import traceback; traceback.print_exc()
     exit(1)

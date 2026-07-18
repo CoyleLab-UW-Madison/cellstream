@@ -23,10 +23,9 @@ from . import cwt
 from . import stft
 from . import hilbert
 from . import filters
-from . import flow
-from .flow import phase_velocity, binned_piv_velocity
 from . import registration
 from . import phase
+from .phase import phase_velocity
 from . import pixels
 from . import experimental
 from . import spatial
