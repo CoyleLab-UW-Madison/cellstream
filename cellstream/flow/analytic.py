@@ -195,6 +195,7 @@ def generate_streamlines(
                         (particles[:, 1] < -1) | (particles[:, 1] > 1)
                         
         if mask is not None:
+            grid_coords = particles.view(1, 1, num_particles, 2)
             mask_t = mask[t:t+1] if mask.ndim == 3 else mask.unsqueeze(0)
             mask_t = mask_t.unsqueeze(0).float()
             m_sampled = F.grid_sample(mask_t, grid_coords, mode='nearest', padding_mode='zeros', align_corners=True)
@@ -283,6 +284,7 @@ def generate_instantaneous_streamlines(
                             (particles[:, 1] < -1) | (particles[:, 1] > 1)
                             
             if mask_t is not None:
+                grid_coords = particles.view(1, 1, num_particles, 2)
                 m_sampled = F.grid_sample(mask_t, grid_coords, mode='nearest', padding_mode='zeros', align_corners=True)
                 out_of_bounds = out_of_bounds | (m_sampled.view(num_particles) < 0.5)
                 
