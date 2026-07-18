@@ -16,8 +16,8 @@ import numpy as np
 import zarr
 from tqdm.auto import tqdm
 
-from .flow.analytic import phase_velocity, compute_ftle
-from .phase import winding_number
+from ..flow.analytic import phase_velocity, compute_ftle
+from .utils import winding_number
 
 def generate_phase_features(
     phase: torch.Tensor,

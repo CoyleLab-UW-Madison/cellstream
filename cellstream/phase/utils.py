@@ -48,7 +48,7 @@ def winding_number(phase_img, n=5, mode="replicate", row_blocks=1, device='cpu')
     idx = torch.tensor(idx, device=device)
     
     if row_blocks == 'auto':
-        from .utils import get_auto_batch_size
+        from ..utils import get_auto_batch_size
         row_blocks = get_auto_batch_size(
             (N * W,), # Batch size represents number of rows (each row has N*W pixels)
             dtype=img_4d.dtype, 
