@@ -35,6 +35,7 @@ def phase_velocity(phase, epsilon=1e-4, smooth_sigma=None, device='cpu', row_blo
     
     velocity = torch.empty((N_batch, T, 2, H, W), dtype=phase_4d.dtype, device=device)
     speed = torch.empty((N_batch, T, H, W), dtype=phase_4d.dtype, device=device)
+    wavenumber = torch.empty((N_batch, T, H, W), dtype=phase_4d.dtype, device=device)
     
     # Gaussian smoothing kernel setup
     kernel = None
@@ -106,11 +107,13 @@ def phase_velocity(phase, epsilon=1e-4, smooth_sigma=None, device='cpu', row_blo
         velocity[:, :, 0, row_start:row_end, :] = vx
         velocity[:, :, 1, row_start:row_end, :] = vy
         speed[:, :, row_start:row_end, :] = torch.sqrt(vx**2 + vy**2)
+        wavenumber[:, :, row_start:row_end, :] = torch.sqrt(grad_sq)
         
     velocity = velocity.reshape(original_shape[:-3] + (T, 2, H, W))
     speed = speed.reshape(original_shape[:-3] + (T, H, W))
+    wavenumber = wavenumber.reshape(original_shape[:-3] + (T, H, W))
     
-    return velocity, speed
+    return velocity, speed, wavenumber
 
 def generate_streamlines(
     velocity: torch.Tensor, 
@@ -209,10 +212,91 @@ def generate_streamlines(
         py = torch.clamp(py, 0, H - 1)
         
         # Draw onto canvas (accumulate brightness)
-        # Using accumulate=False means particles overwriting the same pixel don't get brighter, 
-        # which keeps the visualization more uniform.
-        canvas.index_put_((py, px), torch.tensor(1.0, device=device), accumulate=False)
+        images[t] = canvas
         
+    return images
+
+def generate_instantaneous_streamlines(
+    velocity: torch.Tensor, 
+    num_particles: int = 20000, 
+    steps: int = 50, 
+    velocity_multiplier: float = 1.0,
+    device: str = 'cpu',
+    mask: torch.Tensor = None
+):
+    """
+    Generate a dense (T, Y, X) image stack of instantaneous streamlines.
+    For each frame, time is frozen and particles are integrated along the static field.
+    
+    Args:
+        velocity: (T, 2, Y, X) tensor
+        num_particles: Number of tracer particles per frame
+        steps: How many integration steps to trace the line
+    """
+    velocity = velocity.to(device)
+    T, _, H, W = velocity.shape
+    
+    if mask is not None:
+        mask = mask.to(device)
+        spatial_mask = mask.max(dim=0)[0] if mask.ndim == 3 else mask
+        valid_y, valid_x = torch.where(spatial_mask > 0)
+        num_valid = len(valid_y)
+        if num_valid == 0:
+            mask = None
+            
+    def get_particles(n):
+        if mask is not None:
+            idx = torch.randint(0, num_valid, (n,), device=device)
+            py = valid_y[idx].float()
+            px = valid_x[idx].float()
+            px = px / (W - 1) * 2 - 1
+            py = py / (H - 1) * 2 - 1
+            px += (torch.rand(n, device=device) - 0.5) * 2 / W
+            py += (torch.rand(n, device=device) - 0.5) * 2 / H
+            return torch.stack([px, py], dim=1)
+        else:
+            return (torch.rand((n, 2), device=device, dtype=torch.float32) * 2 - 1)
+            
+    images = torch.zeros((T, H, W), device=device, dtype=torch.float32)
+    vel_scale = torch.tensor([2.0/(W-1), 2.0/(H-1)], device=device).view(1, 2) * velocity_multiplier
+    
+    for t in range(T):
+        canvas = torch.zeros((H, W), device=device, dtype=torch.float32)
+        particles = get_particles(num_particles)
+        v_t = velocity[t:t+1] # Frozen time field (1, 2, H, W)
+        
+        mask_t = None
+        if mask is not None:
+            mask_t = mask[t:t+1] if mask.ndim == 3 else mask.unsqueeze(0)
+            mask_t = mask_t.unsqueeze(0).float()
+            
+        for step in range(steps):
+            grid_coords = particles.view(1, 1, num_particles, 2)
+            v_sampled = F.grid_sample(v_t, grid_coords, mode='bilinear', padding_mode='zeros', align_corners=True)
+            v_sampled = v_sampled.view(2, num_particles).t()
+            
+            particles = particles + v_sampled * vel_scale
+            
+            out_of_bounds = (particles[:, 0] < -1) | (particles[:, 0] > 1) | \
+                            (particles[:, 1] < -1) | (particles[:, 1] > 1)
+                            
+            if mask_t is not None:
+                m_sampled = F.grid_sample(mask_t, grid_coords, mode='nearest', padding_mode='zeros', align_corners=True)
+                out_of_bounds = out_of_bounds | (m_sampled.view(num_particles) == 0)
+                
+            # For static streamlines, we don't necessarily respawn, we just stop drawing them.
+            # But to keep density even, we can respawn out-of-bounds particles!
+            if out_of_bounds.any():
+                n_out = out_of_bounds.sum().item()
+                particles[out_of_bounds] = get_particles(n_out)
+                
+            px = ((particles[:, 0] + 1) / 2 * (W - 1)).round().long()
+            py = ((particles[:, 1] + 1) / 2 * (H - 1)).round().long()
+            px = torch.clamp(px, 0, W - 1)
+            py = torch.clamp(py, 0, H - 1)
+            
+            canvas.index_put_((py, px), torch.tensor(1.0, device=device), accumulate=False)
+            
         images[t] = canvas
         
     return images
