@@ -95,6 +95,11 @@ def generate_phase_features(
     ftle_integration_time: int = 20,
     smooth_sigma: float = 1.0,
     defect_window_size: int = 5,
+    phase_features_to_process: list = None,
+    stream_particles: int = 20000,
+    stream_decay: float = 0.85,
+    stream_inject_rate: float = 0.05,
+    **kwargs
 ):
     """
     Generate all relevant features from a phase field (defects, velocity, FTLE).
@@ -119,10 +124,13 @@ def generate_phase_features(
             - 'ftle_forward':   (T, Y, X) float32 array
             - 'ftle_backward':  (T, Y, X) float32 array
     """
-    from .analytic import phase_velocity, compute_ftle
+    from .analytic import phase_velocity, compute_ftle, generate_streamlines, generate_phase_colored_streamlines
 
     if device is None:
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+    if phase_features_to_process is None:
+        phase_features_to_process = ['velocity', 'speed', 'ftle_forward', 'ftle_backward', 'winding_number']
 
     phase = phase.to(device)
     if mask is not None:
@@ -131,32 +139,41 @@ def generate_phase_features(
     features = {}
     
     # 1. Defects (Winding Number Field)
-    wn = winding_number(phase, n=defect_window_size, device=device)
-    features['winding_number'] = wn.cpu().numpy()
+    if 'winding_number' in phase_features_to_process:
+        wn = winding_number(phase, n=defect_window_size, device=device)
+        features['winding_number'] = wn.cpu().numpy()
     
-    # 2. Phase Velocity
-    v, speed, _ = phase_velocity(phase, smooth_sigma=smooth_sigma, device=device)
-    features['velocity'] = v.cpu().numpy()
-    features['speed'] = speed.cpu().numpy()
+    # Needs velocity?
+    needs_vel = any(k in phase_features_to_process for k in ['velocity', 'speed', 'ftle_forward', 'ftle_backward', 'streamlines', 'phase_streamlines'])
     
-    # 3. FTLE (Forward and Backward)
-    ftle_fwd = compute_ftle(
-        v, 
-        integration_time=ftle_integration_time, 
-        device=device, 
-        mask=mask, 
-        backward=False
-    )
-    features['ftle_forward'] = ftle_fwd.cpu().numpy()
-    
-    ftle_bwd = compute_ftle(
-        v, 
-        integration_time=ftle_integration_time, 
-        device=device, 
-        mask=mask, 
-        backward=True
-    )
-    features['ftle_backward'] = ftle_bwd.cpu().numpy()
+    if needs_vel:
+        v, speed, _ = phase_velocity(phase, smooth_sigma=smooth_sigma, device=device)
+        if 'velocity' in phase_features_to_process:
+            features['velocity'] = v.cpu().numpy()
+        if 'speed' in phase_features_to_process:
+            features['speed'] = speed.cpu().numpy()
+            
+        if 'ftle_forward' in phase_features_to_process:
+            ftle_fwd = compute_ftle(v, integration_time=ftle_integration_time, device=device, mask=mask, backward=False)
+            features['ftle_forward'] = ftle_fwd.cpu().numpy()
+            
+        if 'ftle_backward' in phase_features_to_process:
+            ftle_bwd = compute_ftle(v, integration_time=ftle_integration_time, device=device, mask=mask, backward=True)
+            features['ftle_backward'] = ftle_bwd.cpu().numpy()
+            
+        if 'streamlines' in phase_features_to_process:
+            streams = generate_streamlines(
+                v, num_particles=stream_particles, decay=stream_decay, 
+                device=device, mask=mask, inject_rate=stream_inject_rate
+            )
+            features['streamlines'] = streams.cpu().numpy()
+            
+        if 'phase_streamlines' in phase_features_to_process:
+            p_streams = generate_phase_colored_streamlines(
+                v, phase, num_particles=stream_particles, decay=stream_decay, 
+                device=device, mask=mask, inject_rate=stream_inject_rate
+            )
+            features['phase_streamlines'] = p_streams.cpu().numpy()
 
     # Free GPU memory if we used it
     if torch.cuda.is_available():

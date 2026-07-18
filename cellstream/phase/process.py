@@ -83,54 +83,65 @@ def process_cell(
     features = generate_phase_features(phase, mask=mask, device=device, **kwargs)
     
     # --- Write Defects ---
-    wn_np = features['winding_number']
+    wn_np = features.get('winding_number')
 
-    if 'winding_number' in defects_group:
-        del defects_group['winding_number']
-    defects_group.create_dataset(
-        'winding_number', 
-        data=wn_np, 
-        chunks=(1, wn_np.shape[1], wn_np.shape[2]),
-        compressor=zarr.Blosc(cname='zstd', clevel=3, shuffle=1)
-    )
-    
-    # Extract defect coordinates as a convenience table
-    T = wn_np.shape[0]
-    t_indices = np.arange(T)
-    pos_lists = []
-    neg_lists = []
-    for t in t_indices:
-        pos_y, pos_x = np.where(wn_np[t] > 0.5)
-        neg_y, neg_x = np.where(wn_np[t] < -0.5)
-        if len(pos_y):
-            pos_lists.append(np.column_stack([np.full(len(pos_y), t), pos_y, pos_x]))
-        if len(neg_y):
-            neg_lists.append(np.column_stack([np.full(len(neg_y), t), neg_y, neg_x]))
+    if wn_np is not None:
+        if 'winding_number' in defects_group:
+            del defects_group['winding_number']
+        defects_group.create_dataset(
+            'winding_number', 
+            data=wn_np, 
+            chunks=(1, wn_np.shape[1], wn_np.shape[2]),
+            compressor=zarr.Blosc(cname='zstd', clevel=3, shuffle=1)
+        )
         
-    pos_defects = np.concatenate(pos_lists, axis=0) if pos_lists else np.empty((0, 3), dtype=np.intp)
-    neg_defects = np.concatenate(neg_lists, axis=0) if neg_lists else np.empty((0, 3), dtype=np.intp)
-    
-    for key in ('positive_coords', 'negative_coords'):
-        if key in defects_group:
-            del defects_group[key]
+        # Extract defect coordinates as a convenience table
+        T = wn_np.shape[0]
+        t_indices = np.arange(T)
+        pos_lists = []
+        neg_lists = []
+        for t in t_indices:
+            pos_y, pos_x = np.where(wn_np[t] > 0.5)
+            neg_y, neg_x = np.where(wn_np[t] < -0.5)
+            if len(pos_y):
+                pos_lists.append(np.column_stack([np.full(len(pos_y), t), pos_y, pos_x]))
+            if len(neg_y):
+                neg_lists.append(np.column_stack([np.full(len(neg_y), t), neg_y, neg_x]))
+            
+        pos_defects = np.concatenate(pos_lists, axis=0) if pos_lists else np.empty((0, 3), dtype=np.intp)
+        neg_defects = np.concatenate(neg_lists, axis=0) if neg_lists else np.empty((0, 3), dtype=np.intp)
         
-    defects_group.create_dataset('positive_coords', data=pos_defects)
-    defects_group.create_dataset('negative_coords', data=neg_defects)
+        for key in ('positive_coords', 'negative_coords'):
+            if key in defects_group:
+                del defects_group[key]
+            
+        defects_group.create_dataset('positive_coords', data=pos_defects)
+        defects_group.create_dataset('negative_coords', data=neg_defects)
     
     # --- Write Flow ---
-    v_np = features['velocity']
-    speed_np = features['speed']
-    ftle_fwd_np = features['ftle_forward']
-    ftle_bwd_np = features['ftle_backward']
+    v_np = features.get('velocity')
+    speed_np = features.get('speed')
+    ftle_fwd_np = features.get('ftle_forward')
+    ftle_bwd_np = features.get('ftle_backward')
+    streams_np = features.get('streamlines')
+    pstreams_np = features.get('phase_streamlines')
 
-    for name in ('velocity', 'speed', 'ftle_forward', 'ftle_backward'):
-        if name in flow_group:
+    for name in ('velocity', 'speed', 'ftle_forward', 'ftle_backward', 'streamlines', 'phase_streamlines'):
+        if name in flow_group and features.get(name) is not None:
             del flow_group[name]
             
-    flow_group.create_dataset('velocity',      data=v_np,        chunks=(1, 2, v_np.shape[2], v_np.shape[3]))
-    flow_group.create_dataset('speed',          data=speed_np,    chunks=(1, speed_np.shape[1], speed_np.shape[2]))
-    flow_group.create_dataset('ftle_forward',   data=ftle_fwd_np, chunks=(1, ftle_fwd_np.shape[1], ftle_fwd_np.shape[2]))
-    flow_group.create_dataset('ftle_backward',  data=ftle_bwd_np, chunks=(1, ftle_bwd_np.shape[1], ftle_bwd_np.shape[2]))
+    if v_np is not None:
+        flow_group.create_dataset('velocity',      data=v_np,        chunks=(1, 2, v_np.shape[2], v_np.shape[3]))
+    if speed_np is not None:
+        flow_group.create_dataset('speed',          data=speed_np,    chunks=(1, speed_np.shape[1], speed_np.shape[2]))
+    if ftle_fwd_np is not None:
+        flow_group.create_dataset('ftle_forward',   data=ftle_fwd_np, chunks=(1, ftle_fwd_np.shape[1], ftle_fwd_np.shape[2]))
+    if ftle_bwd_np is not None:
+        flow_group.create_dataset('ftle_backward',  data=ftle_bwd_np, chunks=(1, ftle_bwd_np.shape[1], ftle_bwd_np.shape[2]))
+    if streams_np is not None:
+        flow_group.create_dataset('streamlines',    data=streams_np,  chunks=(1, 3, streams_np.shape[2], streams_np.shape[3]))
+    if pstreams_np is not None:
+        flow_group.create_dataset('phase_streamlines', data=pstreams_np, chunks=(1, 3, pstreams_np.shape[2], pstreams_np.shape[3]))
 
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
