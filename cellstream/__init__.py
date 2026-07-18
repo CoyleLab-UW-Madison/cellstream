@@ -30,6 +30,7 @@ from . import phase
 from . import pixels
 from . import experimental
 from . import spatial
+from . import features
 
 # Convenience re-exports for common functions
 from .io import load_image, load_masks, load_zarr, write_to_zarr
@@ -56,6 +57,7 @@ __all__ = [
     "pixels",
     "experimental",
     "spatial",
+    "features",
     "load_image",
     "load_masks",
     "load_zarr",
