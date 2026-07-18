@@ -420,3 +420,150 @@ def compute_ftle(
         ftle = ftle * (mask_ftle > 0).float()
     
     return ftle
+
+def generate_phase_colored_streamlines(
+    velocity: torch.Tensor,
+    phase: torch.Tensor,
+    num_particles: int = 20000,
+    decay: float = 0.85,
+    velocity_multiplier: float = 1.0,
+    device: str = 'cpu',
+    mask: torch.Tensor = None,
+    inject_rate: float = 0.05
+):
+    """
+    Generate an RGB (T, 3, Y, X) image stack of particle streamlines where
+    each particle is colored by the local phase value it is riding on.
+    
+    Args:
+        velocity: (T, 2, Y, X) tensor of phase velocity
+        phase: (T, Y, X) tensor of phase values in radians [-pi, pi]
+        num_particles: Target number of tracer particles
+        decay: Persistence of comet tails [0.0 - 1.0]
+        velocity_multiplier: Scale particle speeds  
+        device: 'cpu' or 'cuda'
+        mask: Optional mask tensor
+        inject_rate: Fraction of num_particles to inject per frame
+        
+    Returns:
+        images: (T, 3, Y, X) float32 tensor, RGB channels in [0, 1]
+    """
+    velocity = velocity.to(device)
+    phase = phase.to(device)
+    T, _, H, W = velocity.shape
+    max_particles = num_particles * 2
+    inject_per_frame = max(1, int(num_particles * inject_rate))
+    
+    if mask is not None:
+        mask = mask.to(device)
+        spatial_mask = mask.max(dim=0)[0] if mask.ndim == 3 else mask
+        valid_y, valid_x = torch.where(spatial_mask > 0)
+        num_valid = len(valid_y)
+        if num_valid == 0:
+            mask = None
+            
+    def spawn_particles(n):
+        if mask is not None:
+            idx = torch.randint(0, num_valid, (n,), device=device)
+            py = valid_y[idx].float()
+            px = valid_x[idx].float()
+            px = px / (W - 1) * 2 - 1
+            py = py / (H - 1) * 2 - 1
+            px += (torch.rand(n, device=device) - 0.5) * 2 / W
+            py += (torch.rand(n, device=device) - 0.5) * 2 / H
+            return torch.stack([px, py], dim=1)
+        else:
+            return (torch.rand((n, 2), device=device, dtype=torch.float32) * 2 - 1)
+    
+    def hsv_to_rgb_fast(h, s, v):
+        """Vectorized HSV to RGB. h in [0,1], s in [0,1], v in [0,1]. Returns (3,) per element."""
+        h6 = h * 6.0
+        i = h6.long() % 6
+        f = h6 - h6.floor()
+        p = v * (1 - s)
+        q = v * (1 - s * f)
+        t = v * (1 - s * (1 - f))
+        
+        r = torch.where(i == 0, v, torch.where(i == 1, q, torch.where(i == 2, p, torch.where(i == 3, p, torch.where(i == 4, t, v)))))
+        g = torch.where(i == 0, t, torch.where(i == 1, v, torch.where(i == 2, v, torch.where(i == 3, q, torch.where(i == 4, p, p)))))
+        b = torch.where(i == 0, p, torch.where(i == 1, p, torch.where(i == 2, t, torch.where(i == 3, v, torch.where(i == 4, v, q)))))
+        
+        return r, g, b
+    
+    particles = spawn_particles(num_particles)
+    
+    images = torch.zeros((T, 3, H, W), device=device, dtype=torch.float32)
+    canvas_r = torch.zeros((H, W), device=device, dtype=torch.float32)
+    canvas_g = torch.zeros((H, W), device=device, dtype=torch.float32)
+    canvas_b = torch.zeros((H, W), device=device, dtype=torch.float32)
+    
+    vel_scale = torch.tensor([2.0/(W-1), 2.0/(H-1)], device=device).view(1, 2)
+    vel_scale = vel_scale * velocity_multiplier
+    
+    for t in range(T):
+        canvas_r = canvas_r * decay
+        canvas_g = canvas_g * decay
+        canvas_b = canvas_b * decay
+        
+        n = particles.shape[0]
+        if n == 0:
+            particles = spawn_particles(num_particles)
+            n = num_particles
+        
+        v_t = velocity[t:t+1]
+        grid_coords = particles.view(1, 1, n, 2)
+        
+        v_sampled = F.grid_sample(v_t, grid_coords, mode='bilinear', padding_mode='zeros', align_corners=True)
+        v_sampled = v_sampled.view(2, n).t()
+        
+        particles = particles + v_sampled * vel_scale
+        
+        alive = (particles[:, 0] >= -1) & (particles[:, 0] <= 1) & \
+                (particles[:, 1] >= -1) & (particles[:, 1] <= 1)
+                
+        if mask is not None:
+            grid_coords_updated = particles.view(1, 1, n, 2)
+            mask_t = mask[t:t+1] if mask.ndim == 3 else mask.unsqueeze(0)
+            mask_t = mask_t.unsqueeze(0).float()
+            m_sampled = F.grid_sample(mask_t, grid_coords_updated, mode='nearest', padding_mode='zeros', align_corners=True)
+            alive = alive & (m_sampled.view(n) >= 0.5)
+        
+        particles = particles[alive]
+        
+        n_alive = particles.shape[0]
+        if n_alive > 0:
+            # Sample the phase at each particle's position
+            phase_t = phase[t:t+1].unsqueeze(0)  # (1, 1, H, W)
+            gc = particles.view(1, 1, n_alive, 2)
+            phase_sampled = F.grid_sample(phase_t, gc, mode='bilinear', padding_mode='border', align_corners=True)
+            phase_vals = phase_sampled.view(n_alive)
+            
+            # Map phase [-pi, pi] to hue [0, 1]
+            hue = (phase_vals + torch.pi) / (2 * torch.pi)
+            hue = torch.clamp(hue, 0, 1)
+            
+            sat = torch.ones_like(hue)
+            val = torch.ones_like(hue)
+            r, g, b = hsv_to_rgb_fast(hue, sat, val)
+            
+            px = ((particles[:, 0] + 1) / 2 * (W - 1)).round().long()
+            py = ((particles[:, 1] + 1) / 2 * (H - 1)).round().long()
+            px = torch.clamp(px, 0, W - 1)
+            py = torch.clamp(py, 0, H - 1)
+            
+            # Paint each channel with the particle's color
+            canvas_r.index_put_((py, px), r, accumulate=True)
+            canvas_g.index_put_((py, px), g, accumulate=True)
+            canvas_b.index_put_((py, px), b, accumulate=True)
+        
+        new_particles = spawn_particles(inject_per_frame)
+        particles = torch.cat([particles, new_particles], dim=0)
+        
+        if particles.shape[0] > max_particles:
+            particles = particles[:max_particles]
+        
+        images[t, 0] = torch.clamp(canvas_r, 0, 1)
+        images[t, 1] = torch.clamp(canvas_g, 0, 1)
+        images[t, 2] = torch.clamp(canvas_b, 0, 1)
+    
+    return images
