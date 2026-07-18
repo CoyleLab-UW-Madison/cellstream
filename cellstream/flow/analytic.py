@@ -322,29 +322,30 @@ def compute_ftle(
     integration_time: int = 20,
     delta: float = 1.0,
     device: str = 'cpu',
-    mask: torch.Tensor = None
+    mask: torch.Tensor = None,
+    backward: bool = False
 ):
     """
     Compute the Finite-Time Lyapunov Exponent field from a velocity tensor.
     
     Args:
         velocity: (T, 2, Y, X) tensor of velocity
-        integration_time: Number of frames to integrate forward
+        integration_time: Number of frames to integrate forward (or backward)
         delta: Perturbation size in pixels for gradient computation
         device: 'cpu' or 'cuda'
         mask: Optional (Y, X) or (T, Y, X) mask
+        backward: If True, computes backward FTLE (attracting structures). If False, forward FTLE (repelling).
         
     Returns:
-        ftle: (T - integration_time, Y, X) tensor of FTLE values
+        ftle: (T, Y, X) tensor of FTLE values, zero-padded for frames where integration isn't possible
     """
     velocity = velocity.to(device)
     T, _, H, W = velocity.shape
-    T_out = T - integration_time
     
-    if T_out <= 0:
+    if integration_time >= T:
         raise ValueError(f"integration_time ({integration_time}) must be less than T ({T})")
     
-    ftle = torch.zeros((T_out, H, W), device=device, dtype=torch.float32)
+    ftle = torch.zeros((T, H, W), device=device, dtype=torch.float32)
     
     # Create base grid of all pixel coordinates in [-1, 1] range
     gy = torch.linspace(-1, 1, H, device=device)
@@ -356,8 +357,12 @@ def compute_ftle(
     dy_norm = delta * 2.0 / (H - 1)
     
     vel_scale = torch.tensor([2.0/(W-1), 2.0/(H-1)], device=device)
+    if backward:
+        vel_scale = -vel_scale
     
-    for t0 in range(T_out):
+    valid_frames = range(integration_time, T) if backward else range(T - integration_time)
+    
+    for t0 in valid_frames:
         # 4 perturbed grids: +x, -x, +y, -y
         # Each is (H, W, 2) with last dim = (x, y) for grid_sample
         px_pos = torch.stack([grid_x + dx_norm, grid_y], dim=-1)  # +x
@@ -369,7 +374,7 @@ def compute_ftle(
         grids = torch.stack([px_pos, px_neg, py_pos, py_neg], dim=0)  # (4, H, W, 2)
         
         for dt in range(integration_time):
-            t = t0 + dt
+            t = t0 - dt if backward else t0 + dt
             v_t = velocity[t:t+1]  # (1, 2, H, W)
             
             # Sample velocity at all 4 grid positions
@@ -414,9 +419,9 @@ def compute_ftle(
     if mask is not None:
         mask = mask.to(device)
         if mask.ndim == 3:
-            mask_ftle = mask[:T_out]
+            mask_ftle = mask
         else:
-            mask_ftle = mask.unsqueeze(0).expand(T_out, -1, -1)
+            mask_ftle = mask.unsqueeze(0).expand(T, -1, -1)
         ftle = ftle * (mask_ftle > 0).float()
     
     return ftle
