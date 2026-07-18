@@ -38,6 +38,7 @@ def process_cell(
     cell_group: zarr.Group,
     device: str = None,
     force_recompute: bool = False,
+    parent_mask: torch.Tensor = None,
     **kwargs
 ):
     """
@@ -55,7 +56,21 @@ def process_cell(
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     if 'phase' not in cell_group:
-        logger.info(f"Skipping {cell_group.name}: No 'phase' array found.")
+        # Check if phase exists in any subchannels (like minD, minE)
+        # Load mask from top level if it exists
+        top_mask = None
+        if 'mask' in cell_group:
+            top_mask = torch.from_numpy(cell_group['mask'][:].astype('float32'))
+            
+        found_subchannels = False
+        for key in list(cell_group.keys()):
+            subgroup = cell_group[key]
+            if isinstance(subgroup, zarr.Group) and 'phase' in subgroup:
+                process_cell(subgroup, force_recompute=force_recompute, device=device, parent_mask=top_mask, **kwargs)
+                found_subchannels = True
+                
+        if not found_subchannels:
+            logger.info(f"Skipping {cell_group.name}: No 'phase' array found.")
         return
         
     flow_group = cell_group.require_group('flow')
@@ -67,10 +82,20 @@ def process_cell(
         
     # Load data
     phase = torch.from_numpy(cell_group['phase'][:].astype('float32'))
+    
+    # Try to find a mask (either in this group or passed from parent)
     mask = None
     if 'mask' in cell_group:
         mask = torch.from_numpy(cell_group['mask'][:].astype('float32'))
+    elif parent_mask is not None:
+        mask = parent_mask
+        
+    if mask is not None:
+        mask = mask.squeeze()
 
+    # Handle CWT output format (T, 1, Y, X)
+    phase = phase.squeeze()
+    
     # Validate shape — process_cell expects (T, Y, X)
     if phase.ndim != 3:
         logger.warning(
