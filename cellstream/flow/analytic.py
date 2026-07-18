@@ -316,3 +316,107 @@ def generate_instantaneous_streamlines(
         images[t] = torch.clamp(canvas, 0, 1.0)
         
     return images
+
+def compute_ftle(
+    velocity: torch.Tensor,
+    integration_time: int = 20,
+    delta: float = 1.0,
+    device: str = 'cpu',
+    mask: torch.Tensor = None
+):
+    """
+    Compute the Finite-Time Lyapunov Exponent field from a velocity tensor.
+    
+    Args:
+        velocity: (T, 2, Y, X) tensor of velocity
+        integration_time: Number of frames to integrate forward
+        delta: Perturbation size in pixels for gradient computation
+        device: 'cpu' or 'cuda'
+        mask: Optional (Y, X) or (T, Y, X) mask
+        
+    Returns:
+        ftle: (T - integration_time, Y, X) tensor of FTLE values
+    """
+    velocity = velocity.to(device)
+    T, _, H, W = velocity.shape
+    T_out = T - integration_time
+    
+    if T_out <= 0:
+        raise ValueError(f"integration_time ({integration_time}) must be less than T ({T})")
+    
+    ftle = torch.zeros((T_out, H, W), device=device, dtype=torch.float32)
+    
+    # Create base grid of all pixel coordinates in [-1, 1] range
+    gy = torch.linspace(-1, 1, H, device=device)
+    gx = torch.linspace(-1, 1, W, device=device)
+    grid_y, grid_x = torch.meshgrid(gy, gx, indexing='ij')  # (H, W)
+    
+    # Perturbation in normalized coordinates  
+    dx_norm = delta * 2.0 / (W - 1)
+    dy_norm = delta * 2.0 / (H - 1)
+    
+    vel_scale = torch.tensor([2.0/(W-1), 2.0/(H-1)], device=device)
+    
+    for t0 in range(T_out):
+        # 4 perturbed grids: +x, -x, +y, -y
+        # Each is (H, W, 2) with last dim = (x, y) for grid_sample
+        px_pos = torch.stack([grid_x + dx_norm, grid_y], dim=-1)  # +x
+        px_neg = torch.stack([grid_x - dx_norm, grid_y], dim=-1)  # -x
+        py_pos = torch.stack([grid_x, grid_y + dy_norm], dim=-1)  # +y
+        py_neg = torch.stack([grid_x, grid_y - dy_norm], dim=-1)  # -y
+        
+        # Advect all 4 grids forward for integration_time steps
+        grids = torch.stack([px_pos, px_neg, py_pos, py_neg], dim=0)  # (4, H, W, 2)
+        
+        for dt in range(integration_time):
+            t = t0 + dt
+            v_t = velocity[t:t+1]  # (1, 2, H, W)
+            
+            # Sample velocity at all 4 grid positions
+            # grid_sample expects (N, H, W, 2)
+            v_sampled = F.grid_sample(v_t.expand(4, -1, -1, -1), grids, 
+                                       mode='bilinear', padding_mode='border', align_corners=True)
+            # v_sampled: (4, 2, H, W)
+            
+            # Update positions: grids[..., 0] += vx * scale_x, grids[..., 1] += vy * scale_y
+            grids[..., 0] = grids[..., 0] + v_sampled[:, 0] * vel_scale[0]
+            grids[..., 1] = grids[..., 1] + v_sampled[:, 1] * vel_scale[1]
+            
+            # Clamp to valid range
+            grids = torch.clamp(grids, -1, 1)
+        
+        # Compute deformation gradient from final positions
+        # dx/dx0 = (x_plus - x_minus) / (2 * delta)
+        # But we need to convert back from normalized to pixel coords
+        # F_xx = d(final_x)/d(initial_x)
+        F_xx = (grids[0, :, :, 0] - grids[1, :, :, 0]) / (2 * dx_norm)
+        F_xy = (grids[2, :, :, 0] - grids[3, :, :, 0]) / (2 * dy_norm)
+        F_yx = (grids[0, :, :, 1] - grids[1, :, :, 1]) / (2 * dx_norm)
+        F_yy = (grids[2, :, :, 1] - grids[3, :, :, 1]) / (2 * dy_norm)
+        
+        # Cauchy-Green tensor C = F^T F
+        C_xx = F_xx**2 + F_yx**2
+        C_xy = F_xx * F_xy + F_yx * F_yy
+        C_yy = F_xy**2 + F_yy**2
+        
+        # Max eigenvalue of 2x2 symmetric matrix:
+        # lambda_max = (trace + sqrt(trace^2 - 4*det)) / 2
+        trace = C_xx + C_yy
+        det = C_xx * C_yy - C_xy**2
+        discriminant = torch.clamp(trace**2 - 4 * det, min=0)
+        lambda_max = (trace + torch.sqrt(discriminant)) / 2
+        lambda_max = torch.clamp(lambda_max, min=1.0)  # eigenvalue >= 1 (no contraction below identity)
+        
+        # FTLE = (1/T) * ln(sqrt(lambda_max)) = (1/(2T)) * ln(lambda_max)
+        ftle[t0] = torch.log(lambda_max) / (2.0 * integration_time)
+    
+    # Apply mask if provided
+    if mask is not None:
+        mask = mask.to(device)
+        if mask.ndim == 3:
+            mask_ftle = mask[:T_out]
+        else:
+            mask_ftle = mask.unsqueeze(0).expand(T_out, -1, -1)
+        ftle = ftle * (mask_ftle > 0).float()
+    
+    return ftle
