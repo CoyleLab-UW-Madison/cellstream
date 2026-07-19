@@ -60,7 +60,7 @@ def winding_number(phase_img, n=5, mode="replicate", row_blocks=1, device='cpu')
         row_blocks = max(1, row_blocks)
 
     # Process in row blocks to save memory
-    for row_start in tqdm(range(0, H, row_blocks)):
+    for row_start in tqdm(range(0, H, row_blocks), desc="Winding number", leave=False):
         row_end = min(row_start + row_blocks, H)
         rows = row_end - row_start
 

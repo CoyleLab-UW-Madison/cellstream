@@ -237,7 +237,7 @@ def process_zarr_store(zarr_path: str, force: bool = False, **kwargs):
 
     logger.info(f"Found {len(cell_ids)} cells.")
     
-    for cell_id in tqdm(cell_ids, desc="Processing phase features"):
+    for cell_id in tqdm(cell_ids, desc="Processing phase features", position=0, leave=True):
         try:
             process_cell(cells_group[cell_id], force_recompute=force, **kwargs)
         except Exception as e:
