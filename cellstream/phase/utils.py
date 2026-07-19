@@ -88,6 +88,19 @@ def winding_number(phase_img, n=5, mode="replicate", row_blocks=1, device='cpu')
     return winding.reshape(original_shape)
 
 
+# All requestable phase features
+PHASE_FEATURES = [
+    'winding_number',
+    'velocity',
+    'speed',
+    'wavenumber',
+    'ftle_forward',
+    'ftle_backward',
+    'streamlines',
+    'phase_streamlines',
+]
+
+
 def generate_phase_features(
     phase: torch.Tensor,
     mask: torch.Tensor = None,
@@ -115,14 +128,26 @@ def generate_phase_features(
         ftle_integration_time: Number of frames for FTLE integration.
         smooth_sigma: Gaussian smoothing sigma for phase velocity.
         defect_window_size: Kernel size for winding number computation (must be odd).
+        phase_features_to_process: List of feature keys to compute.  Valid keys
+            are defined in ``PHASE_FEATURES``.  Defaults to
+            ``['velocity', 'speed', 'ftle_forward', 'ftle_backward', 'winding_number']``.
+        stream_particles: Number of tracer particles for streamline generation.
+        stream_decay: Exponential decay factor for streamline tails.
+        stream_inject_rate: Fraction of particles to inject per frame.
         
     Returns:
-        dict with keys:
-            - 'winding_number': (T, Y, X) float32 array
-            - 'velocity':       (T, 2, Y, X) float32 array
-            - 'speed':          (T, Y, X) float32 array
-            - 'ftle_forward':   (T, Y, X) float32 array
-            - 'ftle_backward':  (T, Y, X) float32 array
+        dict  — keys are the computed feature names, values are numpy arrays.
+        Also contains ``'_attrs'`` with processing parameters for reproducibility.
+
+        Output shapes (all float32 numpy):
+            - 'winding_number': (T, Y, X)
+            - 'velocity':       (T, 2, Y, X)
+            - 'speed':          (T, Y, X)
+            - 'wavenumber':     (T, Y, X)
+            - 'ftle_forward':   (T, Y, X)
+            - 'ftle_backward':  (T, Y, X)
+            - 'streamlines':    (T, Y, X)
+            - 'phase_streamlines': (T, 3, Y, X)
     """
     from .analytic import phase_velocity, compute_ftle, generate_streamlines, generate_phase_colored_streamlines
 
@@ -144,14 +169,19 @@ def generate_phase_features(
         features['winding_number'] = wn.cpu().numpy()
     
     # Needs velocity?
-    needs_vel = any(k in phase_features_to_process for k in ['velocity', 'speed', 'ftle_forward', 'ftle_backward', 'streamlines', 'phase_streamlines'])
+    needs_vel = any(k in phase_features_to_process for k in [
+        'velocity', 'speed', 'wavenumber', 'ftle_forward', 'ftle_backward', 
+        'streamlines', 'phase_streamlines'
+    ])
     
     if needs_vel:
-        v, speed, _ = phase_velocity(phase, smooth_sigma=smooth_sigma, device=device)
+        v, speed, wavenumber = phase_velocity(phase, smooth_sigma=smooth_sigma, device=device)
         if 'velocity' in phase_features_to_process:
             features['velocity'] = v.cpu().numpy()
         if 'speed' in phase_features_to_process:
             features['speed'] = speed.cpu().numpy()
+        if 'wavenumber' in phase_features_to_process:
+            features['wavenumber'] = wavenumber.cpu().numpy()
             
         if 'ftle_forward' in phase_features_to_process:
             ftle_fwd = compute_ftle(v, integration_time=ftle_integration_time, device=device, mask=mask, backward=False)
@@ -174,6 +204,18 @@ def generate_phase_features(
                 device=device, mask=mask, inject_rate=stream_inject_rate
             )
             features['phase_streamlines'] = p_streams.cpu().numpy()
+
+    # Store processing parameters for reproducibility (P3)
+    features['_attrs'] = {
+        'smooth_sigma': smooth_sigma,
+        'ftle_integration_time': ftle_integration_time,
+        'defect_window_size': defect_window_size,
+        'phase_features_to_process': list(phase_features_to_process),
+        'stream_particles': stream_particles,
+        'stream_decay': stream_decay,
+        'stream_inject_rate': stream_inject_rate,
+        'device': device,
+    }
 
     # Free GPU memory if we used it
     if torch.cuda.is_available():

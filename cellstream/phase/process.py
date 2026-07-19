@@ -10,17 +10,20 @@ into the appropriate Zarr groups.
 Expected Zarr layout written by ``process_cell``::
 
     cell_group/
-        phase           # (T, Y, X) input — must already exist
-        mask            # (T, Y, X) optional input
+        phase             # (T, 1, Y, X) input — must already exist
+        mask              # (Y, X) optional input
         defects/
-            winding_number   # (T, Y, X)
+            winding_number   # (T, 1, Y, X)  — matches CWT sibling shape
             positive_coords  # (N, 3) — [t, y, x]
             negative_coords  # (N, 3) — [t, y, x]
         flow/
             velocity         # (T, 2, Y, X)
-            speed            # (T, Y, X)
-            ftle_forward     # (T, Y, X)
-            ftle_backward    # (T, Y, X)
+            speed            # (T, 1, Y, X)  — matches CWT sibling shape
+            wavenumber       # (T, 1, Y, X)  — matches CWT sibling shape
+            ftle_forward     # (T, 1, Y, X)  — matches CWT sibling shape
+            ftle_backward    # (T, 1, Y, X)  — matches CWT sibling shape
+            streamlines      # (T, 1, Y, X)  — matches CWT sibling shape
+            phase_streamlines # (T, 3, Y, X) — RGB
 """
 
 import logging
@@ -32,6 +35,18 @@ import zarr
 from tqdm.auto import tqdm
 
 from .utils import generate_phase_features
+
+
+def _expand_to_4d(arr):
+    """Insert a singleton dim at axis=1 so (T, Y, X) → (T, 1, Y, X).
+    
+    This ensures phase-derived features share the same axis convention as
+    the CWT sibling arrays (T, num_banks, Y, X) in the same Zarr group,
+    so Napari can overlay them without shape mismatch.
+    """
+    if arr.ndim == 3:
+        return np.expand_dims(arr, axis=1)
+    return arr
 
 
 def process_cell(
@@ -76,9 +91,22 @@ def process_cell(
     flow_group = cell_group.require_group('flow')
     defects_group = cell_group.require_group('defects')
     
-    # Check if we need to run
-    if not force_recompute and 'velocity' in flow_group and 'winding_number' in defects_group:
-        return
+    # --- P4: Smart skip logic — check which requested features are missing ---
+    requested = kwargs.get('phase_features_to_process', None)
+    if requested is None:
+        requested = ['velocity', 'speed', 'ftle_forward', 'ftle_backward', 'winding_number']
+    
+    if not force_recompute:
+        # Map feature names to the group + key where they're stored
+        existing = set()
+        for k in flow_group.keys():
+            existing.add(k)
+        for k in defects_group.keys():
+            existing.add(k)
+        
+        missing = [f for f in requested if f not in existing]
+        if not missing:
+            return  # All requested features already present
         
     # Load data
     phase = torch.from_numpy(cell_group['phase'][:].astype('float32'))
@@ -107,16 +135,23 @@ def process_cell(
     # Generate unified features
     features = generate_phase_features(phase, mask=mask, device=device, **kwargs)
     
+    # --- Write _attrs metadata for reproducibility (P3) ---
+    attrs_dict = features.get('_attrs', {})
+    if attrs_dict:
+        cell_group.attrs.update({'phase_processing': attrs_dict})
+    
     # --- Write Defects ---
     wn_np = features.get('winding_number')
 
     if wn_np is not None:
+        # P0: Expand (T, Y, X) → (T, 1, Y, X) to match CWT axis convention
+        wn_4d = _expand_to_4d(wn_np)
         if 'winding_number' in defects_group:
             del defects_group['winding_number']
         defects_group.create_dataset(
             'winding_number', 
-            data=wn_np, 
-            chunks=(1, wn_np.shape[1], wn_np.shape[2]),
+            data=wn_4d, 
+            chunks=(1, 1, wn_4d.shape[2], wn_4d.shape[3]),
             compressor=zarr.Blosc(cname='zstd', clevel=3, shuffle=1)
         )
         
@@ -144,29 +179,34 @@ def process_cell(
         defects_group.create_dataset('negative_coords', data=neg_defects)
     
     # --- Write Flow ---
-    v_np = features.get('velocity')
-    speed_np = features.get('speed')
-    ftle_fwd_np = features.get('ftle_forward')
-    ftle_bwd_np = features.get('ftle_backward')
-    streams_np = features.get('streamlines')
-    pstreams_np = features.get('phase_streamlines')
+    # Features that keep their native shape (already have a non-spatial dim at axis 1)
+    v_np = features.get('velocity')             # (T, 2, Y, X)
+    pstreams_np = features.get('phase_streamlines')  # (T, 3, Y, X)
+    
+    # Features that need (T, Y, X) → (T, 1, Y, X) expansion for CWT compatibility
+    speed_np = features.get('speed')            # (T, Y, X) → (T, 1, Y, X)
+    wavenumber_np = features.get('wavenumber')  # (T, Y, X) → (T, 1, Y, X)
+    ftle_fwd_np = features.get('ftle_forward')  # (T, Y, X) → (T, 1, Y, X)
+    ftle_bwd_np = features.get('ftle_backward') # (T, Y, X) → (T, 1, Y, X)
+    streams_np = features.get('streamlines')    # (T, Y, X) → (T, 1, Y, X)
 
-    for name in ('velocity', 'speed', 'ftle_forward', 'ftle_backward', 'streamlines', 'phase_streamlines'):
+    all_flow_keys = ('velocity', 'speed', 'wavenumber', 'ftle_forward', 'ftle_backward', 'streamlines', 'phase_streamlines')
+    for name in all_flow_keys:
         if name in flow_group and features.get(name) is not None:
             del flow_group[name]
             
     if v_np is not None:
-        flow_group.create_dataset('velocity',      data=v_np,        chunks=(1, 2, v_np.shape[2], v_np.shape[3]))
-    if speed_np is not None:
-        flow_group.create_dataset('speed',          data=speed_np,    chunks=(1, speed_np.shape[1], speed_np.shape[2]))
-    if ftle_fwd_np is not None:
-        flow_group.create_dataset('ftle_forward',   data=ftle_fwd_np, chunks=(1, ftle_fwd_np.shape[1], ftle_fwd_np.shape[2]))
-    if ftle_bwd_np is not None:
-        flow_group.create_dataset('ftle_backward',  data=ftle_bwd_np, chunks=(1, ftle_bwd_np.shape[1], ftle_bwd_np.shape[2]))
-    if streams_np is not None:
-        flow_group.create_dataset('streamlines',    data=streams_np,  chunks=(1, 3, streams_np.shape[2], streams_np.shape[3]))
+        flow_group.create_dataset('velocity', data=v_np, chunks=(1, 2, v_np.shape[2], v_np.shape[3]))
     if pstreams_np is not None:
         flow_group.create_dataset('phase_streamlines', data=pstreams_np, chunks=(1, 3, pstreams_np.shape[2], pstreams_np.shape[3]))
+    
+    # P0: Write scalar fields with singleton bank dim to match CWT convention
+    for name, arr in [('speed', speed_np), ('wavenumber', wavenumber_np),
+                      ('ftle_forward', ftle_fwd_np), ('ftle_backward', ftle_bwd_np),
+                      ('streamlines', streams_np)]:
+        if arr is not None:
+            arr_4d = _expand_to_4d(arr)
+            flow_group.create_dataset(name, data=arr_4d, chunks=(1, 1, arr_4d.shape[2], arr_4d.shape[3]))
 
     if torch.cuda.is_available():
         torch.cuda.empty_cache()

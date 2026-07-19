@@ -5,7 +5,7 @@ Phase-field analysis: topological defect detection, phase velocity,
 FTLE computation, and streamline generation.
 """
 
-from .utils import winding_number, generate_phase_features
+from .utils import winding_number, generate_phase_features, PHASE_FEATURES
 from .analytic import (
     phase_velocity,
     compute_ftle,
@@ -24,6 +24,7 @@ __all__ = [
     "generate_instantaneous_streamlines",
     "generate_phase_colored_streamlines",
     # Feature generation
+    "PHASE_FEATURES",
     "generate_phase_features",
     # Batch processing
     "process_cell",
