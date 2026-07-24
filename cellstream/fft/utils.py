@@ -181,10 +181,18 @@ def generate_fft_features(
     centered_image = image - mean_image
 
     feature_map = {}
+    
+    rich_progress = kwargs.pop('rich_progress', None)
+    rich_cell_name = kwargs.pop('rich_cell_name', 'cell')
+    disable_tqdm = rich_progress is not None
 
     if batch_size is not None:
         centered_image = centered_image.reshape(T, C, X * Y)
-        bar = tqdm(total=X * Y)
+        
+        if rich_progress:
+            task = rich_progress.add_task(f"[cyan]Computing FFT for {rich_cell_name}...", total=X * Y)
+            
+        bar = tqdm(total=X * Y, desc="FFT Blocks", leave=False, disable=disable_tqdm)
 
         # Allocate
         logger.info("Pre-allocating output arrays...")
@@ -218,28 +226,40 @@ def generate_fft_features(
                 buffers["phase"][:, :, start:end] = phase[:max_bin].cpu()
 
             bar.update(end - start)
+            if rich_progress:
+                rich_progress.advance(task, advance=end - start)
 
         for key in buffers:
             feature_map[key] = buffers[key].reshape(max_bin, C, X, Y)
+        
+        bar.close()
+        if rich_progress:
+            rich_progress.remove_task(task)
 
     else:
-        fft = torch.fft.rfft(centered_image, axis=0)
+        if rich_progress:
+            task = rich_progress.add_task(f"[cyan]Computing FFT for {rich_cell_name}...", total=None)
+            
+        fft = torch.fft.rfft(centered_image.to(device), axis=0)
         amp = fft.abs()
 
         if "full_amplitude" in fft_features_to_process:
-            feature_map["full_amplitude"] = amp[:max_bin]
+            feature_map["full_amplitude"] = amp[:max_bin].cpu()
 
         if "normalized_amplitude" in fft_features_to_process:
             norm_amp = amp / amp.sum(axis=0)
-            feature_map["normalized_amplitude"] = norm_amp[:max_bin]
+            feature_map["normalized_amplitude"] = norm_amp[:max_bin].cpu()
 
         if "z_score" in fft_features_to_process:
             z = (amp - amp.mean(dim=0, keepdims=True)) / amp.std(dim=0, keepdims=True)
-            feature_map["z_score"] = z[:max_bin]
+            feature_map["z_score"] = z[:max_bin].cpu()
 
         if "phase" in fft_features_to_process:
             phase = fft.angle()
-            feature_map["phase"] = phase[:max_bin]
+            feature_map["phase"] = phase[:max_bin].cpu()
+            
+        if rich_progress:
+            rich_progress.remove_task(task)
 
     if return_timeseries:
         feature_map["timeseries"] = preprocessed_timeseries

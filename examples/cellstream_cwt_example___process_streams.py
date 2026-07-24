@@ -51,7 +51,7 @@ result = cellstream.cwt.process_cwt_image_cellstreams(
     crop_zarrs=True,
     return_timeseries=True,
     crop_output_path="cwt_example_crops.zarr",
-    crop_kwargs={"padding_fraction": 0.2, "show_progress": True}
+    crop_kwargs={"padding_fraction": 0.2, "show_progress": True, "min_mask_size": 100}
 )
 
 df, crop_root = result # note: crop_zarr=True -> (dataframe,zarr) tuple

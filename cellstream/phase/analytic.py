@@ -2,7 +2,7 @@ import torch
 import torch.nn.functional as F
 from tqdm.auto import tqdm
 
-def phase_velocity(phase, epsilon=1e-4, smooth_sigma=None, device='cpu', row_blocks='auto'):
+def phase_velocity(phase, epsilon=1e-4, smooth_sigma=None, device='cpu', row_blocks='auto', disable_tqdm=False):
     """
     Compute instantaneous wave velocity field from a phase timeseries
     using the analytic level-set velocity formula on the complex signal.
@@ -66,7 +66,7 @@ def phase_velocity(phase, epsilon=1e-4, smooth_sigma=None, device='cpu', row_blo
     phase_t_pad = F.pad(phase_4d, (0, 0, 0, 0, 1, 1), mode='replicate')
     z_all = torch.exp(1j * phase_t_pad)
 
-    for row_start in tqdm(range(0, H, row_blocks), desc="Analytic phase velocity", leave=False):
+    for row_start in tqdm(range(0, H, row_blocks), desc="Analytic phase velocity", leave=False, disable=disable_tqdm):
         row_end = min(row_start + row_blocks, H)
         
         y_start = max(0, row_start - total_pad)

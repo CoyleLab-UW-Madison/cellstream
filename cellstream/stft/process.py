@@ -7,7 +7,15 @@ High-level Continuous Wavelet Transform (STFT) processing pipelines.
 import logging
 logger = logging.getLogger(__name__)
 import os
-from tqdm.auto import tqdm
+try:
+    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn, TimeRemainingColumn
+    from rich.console import Console
+    from rich.tree import Tree
+    from rich.table import Table
+    console = Console()
+    RICH_AVAILABLE = True
+except ImportError:
+    RICH_AVAILABLE = False
 import torch
 import pandas as pd
 import numpy as np
@@ -116,45 +124,81 @@ def process_folder_stft_cellstreams(images_directory, masks_directory, **kwargs)
     """
     images = sorted(os.listdir(images_directory))
     data = []
+    progress_cb = kwargs.get("progress_callback")
+    show_progress = kwargs.get("show_progress", True)
     
-    for image_filename in tqdm(images):
-        name, ext = os.path.splitext(image_filename)
-        ext = ext.lower().lstrip(".")
+    import contextlib
+    if progress_cb is None and show_progress and RICH_AVAILABLE:
+        progress_ctx = Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            TimeElapsedColumn(),
+            TimeRemainingColumn(),
+            console=console
+        )
+    else:
+        progress_ctx = contextlib.nullcontext()
         
-        if ext in ["nd2", "tif", "tiff"]:
-            masks_filename = f"{name}_masks.tif"
-            image_path = os.path.join(images_directory, image_filename)
-            mask_path = os.path.join(masks_directory, masks_filename)
+    with progress_ctx as progress:
+        if progress_cb is not None:
+            iterator = images
+        elif show_progress:
+            if RICH_AVAILABLE:
+                task = progress.add_task("[bold green]Processing STFT folders...", total=len(images))
+                iterator = images
+                kwargs["rich_progress"] = progress
+            else:
+                from tqdm.auto import tqdm
+                iterator = tqdm(images, desc="Processing STFT folders")
+        else:
+            iterator = images
             
-            # Check if mask exists, fallback to standard check
-            if not os.path.exists(mask_path):
-                # Try .tiff or other extension variants
-                masks_filename_alt = f"{name}_masks.tiff"
-                mask_path_alt = os.path.join(masks_directory, masks_filename_alt)
-                if os.path.exists(mask_path_alt):
-                    mask_path = mask_path_alt
-                    masks_filename = masks_filename_alt
-                    
-            if not os.path.exists(mask_path):
-                logger.warning(f" Mask file not found: {mask_path}. Skipping.")
-                continue
+        for image_filename in iterator:
+            if progress_cb is not None:
+                progress_cb()
+            if RICH_AVAILABLE and progress_cb is None and show_progress:
+                progress.update(task, description=f"[bold green]Processing STFT: {image_filename}")
+            name, ext = os.path.splitext(image_filename)
+            ext = ext.lower().lstrip(".")
+            
+            if ext in ["nd2", "tif", "tiff"]:
+                masks_filename = f"{name}_masks.tif"
+                image_path = os.path.join(images_directory, image_filename)
+                mask_path = os.path.join(masks_directory, masks_filename)
                 
-            logger.info(f"Processing STFT: {image_path} with {mask_path}")
-            image = load_image(image_path)
-            masks = load_masks(mask_path)
-            
-            try:
-                pos_data_for_image = process_stft_image_cellstreams(
-                    image,
-                    masks,
-                    image_filename=image_filename,
-                    masks_filename=masks_filename,
-                    **kwargs,
-                )
-                if not pos_data_for_image.empty:
-                    data.append(pos_data_for_image)
-            except Exception as e:
-                logger.error(f"Error processing {image_filename}: {e}")
+                # Check if mask exists, fallback to standard check
+                if not os.path.exists(mask_path):
+                    # Try .tiff or other extension variants
+                    masks_filename_alt = f"{name}_masks.tiff"
+                    mask_path_alt = os.path.join(masks_directory, masks_filename_alt)
+                    if os.path.exists(mask_path_alt):
+                        mask_path = mask_path_alt
+                        masks_filename = masks_filename_alt
+                        
+                if not os.path.exists(mask_path):
+                    logger.warning(f" Mask file not found: {mask_path}. Skipping.")
+                    continue
+                    
+                image = load_image(image_path)
+                masks = load_masks(mask_path)
+                
+                try:
+                    pos_data_for_image = process_stft_image_cellstreams(
+                        image,
+                        masks,
+                        image_filename=image_filename,
+                        masks_filename=masks_filename,
+                        **kwargs,
+                    )
+                    if not pos_data_for_image.empty:
+                        data.append(pos_data_for_image)
+                except Exception as e:
+                    logger.error(f"Error processing {image_filename}: {e}")
+                    
+                if RICH_AVAILABLE and progress_cb is None and show_progress:
+                    progress.advance(task)
                 
     if not data:
         return pd.DataFrame()

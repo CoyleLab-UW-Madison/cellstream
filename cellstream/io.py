@@ -12,6 +12,13 @@ import tifffile
 import torch
 import zarr
 
+try:
+    from rich.tree import Tree
+    from rich.console import Console
+    RICH_AVAILABLE = True
+except ImportError:
+    RICH_AVAILABLE = False
+
 class TorchZarrStore:
     """Wrapper around Zarr group or array (v2 or v3) to return Torch tensors."""
     def __init__(self, path_or_zarr):
@@ -51,10 +58,55 @@ class TorchZarrStore:
         return key in self.keys()
 
     def __repr__(self):
-        if not self._is_array:
-            return f"TorchZarrStore(keys={self.keys()})"
+        if RICH_AVAILABLE:
+            path_name = "Zarr Store"
+            if hasattr(self._z, "store"):
+                if hasattr(self._z.store, "path"):
+                    path_name = self._z.store.path
+                elif hasattr(self._z.store, "dir_path"):
+                    path_name = self._z.store.dir_path
+            
+            tree = Tree(f"[bold red]TorchZarrStore[/bold red] ({path_name})")
+            
+            def build_tree(z_obj, parent_tree, max_depth=2, current_depth=0, force_full=False):
+                if current_depth > max_depth and not force_full:
+                    parent_tree.add("[cyan]... (max depth reached)[/cyan]")
+                    return
+                
+                if hasattr(z_obj, "shape"):
+                    parent_tree.add(f"[green]Array[/green] {z_obj.shape} {z_obj.dtype}")
+                else:
+                    keys = list(z_obj.keys())
+                    keys_to_print = keys if force_full else keys[:20]
+                    
+                    for i, k in enumerate(keys_to_print):
+                        child = z_obj[k]
+                        
+                        # If at the root, force full expansion for the very last item we print
+                        is_last_at_root = (current_depth == 0 and i == len(keys_to_print) - 1)
+                        child_force_full = force_full or is_last_at_root
+                        
+                        if hasattr(child, "shape"):
+                            parent_tree.add(f"[blue]{k}[/blue] : [green]Array[/green] {child.shape} {child.dtype}")
+                        else:
+                            node = parent_tree.add(f"[blue]{k}[/blue] : [yellow]Group[/yellow]")
+                            build_tree(child, node, max_depth, current_depth + 1, force_full=child_force_full)
+                    
+                    if not force_full and len(keys) > 20:
+                        parent_tree.add(f"[cyan]... and {len(keys) - 20} more[/cyan]")
+                        
+            build_tree(self._z, tree, max_depth=2)
+            
+            console = Console(force_terminal=False, color_system="truecolor")
+            with console.capture() as capture:
+                console.print(tree)
+            # Remove trailing newline so we don't have blank lines in REPL
+            return capture.get().rstrip('\n')
         else:
-            return f"TorchZarrStore(shape={self._z.shape}, dtype={str(self._z.dtype)})"
+            if not self._is_array:
+                return f"TorchZarrStore(keys={self.keys()})"
+            else:
+                return f"TorchZarrStore(shape={self._z.shape}, dtype={str(self._z.dtype)})"
 
     def __getitem__(self, key):
         if key == "_attrs" and len(self._z.attrs) > 0:

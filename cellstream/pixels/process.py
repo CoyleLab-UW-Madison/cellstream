@@ -10,6 +10,16 @@ from ..registration import register_and_transform_image_timeseries
 
 logger = logging.getLogger(__name__)
 
+try:
+    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn, TimeRemainingColumn
+    from rich.console import Console
+    from rich.tree import Tree
+    from rich.table import Table
+    console = Console()
+    RICH_AVAILABLE = True
+except ImportError:
+    RICH_AVAILABLE = False
+
 def profile_image_pixels(
     img,
     channel_names=None,
@@ -142,7 +152,8 @@ def batch_profile_pixels(
     device=None,
     max_fft_bin=50,
     fft_batch_size='auto',
-    show_progress=True
+    show_progress=True,
+    progress_callback=None
 ):
     """
     Profiles pixels for a batch of images and aggregates them into a single DataFrame.
@@ -150,22 +161,27 @@ def batch_profile_pixels(
     run_metadata = locals().copy()
     all_data_frames = []
     
-    tqdm_available = False
-    if show_progress:
-        try:
-            from tqdm.auto import tqdm
-            bar = tqdm(total=len(file_paths))
-            tqdm_available = True
-        except ImportError:
-            pass
-    
     if isinstance(file_paths, str):
         logger.info(f"Converting {file_paths} to list of paths...")
         file_paths = [path for path in Path(file_paths).iterdir() if path.is_file()]
     
-    for i, fp in enumerate(file_paths):
+    iterator = file_paths
+    if progress_callback is None and show_progress:
+        if RICH_AVAILABLE:
+            from rich.progress import track
+            iterator = track(file_paths, description="[bold green]Processing pixel stats...", console=console)
+        else:
+            try:
+                from tqdm.auto import tqdm
+                iterator = tqdm(file_paths, desc="Processing pixel stats")
+            except ImportError:
+                pass
+    
+    for i, fp in enumerate(iterator):
+        if progress_callback is not None:
+            progress_callback()
         fp_path = Path(fp)
-        if show_progress and not tqdm_available:
+        if show_progress and progress_callback is None and not RICH_AVAILABLE and 'tqdm' not in str(type(iterator)):
             logger.info(f"[{i+1}/{len(file_paths)}] Processing: {fp_path.name} ...")
             
         try:
@@ -195,12 +211,6 @@ def batch_profile_pixels(
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-            
-        if show_progress and tqdm_available:
-            bar.update(i + 1)
-
-    if show_progress and tqdm_available:
-        bar.close()
 
     if all_data_frames:
         if show_progress:

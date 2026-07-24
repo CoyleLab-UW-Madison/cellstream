@@ -8,6 +8,7 @@ import logging
 logger = logging.getLogger(__name__)
 import torch
 import torch.nn.functional as F
+import numpy as np
 from tqdm.auto import tqdm
 
 def normalize_dims(image, channel_dim=1):
@@ -56,6 +57,36 @@ def downsample(tensor, scale, is_mask=False):
     elif original_dim == 3:
         return out.squeeze(0)
     return out
+
+def filter_masks_by_area(masks, min_area):
+    """
+    Remove cells (set label to 0) from mask tensor whose area is < min_area.
+    Assumes masks is a 2D or 3D tensor where labels are > 0.
+    """
+    if min_area is None or min_area <= 0:
+        return masks
+        
+    is_numpy = not isinstance(masks, torch.Tensor)
+    if is_numpy:
+        masks = torch.from_numpy(masks)
+        
+    unique, counts = torch.unique(masks, return_counts=True)
+    # Mask out background
+    valid = unique != 0
+    unique = unique[valid]
+    counts = counts[valid]
+    
+    # Find labels to remove
+    to_remove = unique[counts < min_area]
+    if len(to_remove) > 0:
+        logger.info(f"Removing {len(to_remove)} cells with area < {min_area}")
+        # Create boolean mask of labels to zero out
+        mask_to_zero = torch.isin(masks, to_remove)
+        masks[mask_to_zero] = 0
+        
+    if is_numpy:
+        return masks.numpy()
+    return masks
 
 def normalize_histogram(image):
     """

@@ -286,7 +286,7 @@ def generate_stft_image_cellstreams(
     logger.info("Generating STFT cellstreams")
     cursor = 0  # position in block to process
 
-    for b in tqdm(range(blocks)):
+    for b in tqdm(range(blocks), desc="STFT Blocks", leave=False):
         this_block_size = block_size + (1 if b < remainder else 0)
         end = cursor + this_block_size
         block = img[cursor:end]  # (this_block_size, C, T)

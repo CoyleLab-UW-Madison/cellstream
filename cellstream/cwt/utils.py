@@ -310,6 +310,10 @@ def generate_cwt_image_cellstreams(
     # gpu environment setup for squeezepy
     os.environ["SSQ_GPU"] = "1" if use_gpu else "0"
 
+    rich_progress = ssqueezepy_cwt_kwargs.pop("rich_progress", None)
+    rich_cell_name = ssqueezepy_cwt_kwargs.pop("rich_cell_name", "cell")
+    disable_tqdm = rich_progress is not None
+
     if channel_outputs is None:
         channel_outputs = {0: ["amp", "freq", "phase"]}
 
@@ -373,8 +377,11 @@ def generate_cwt_image_cellstreams(
 
     logger.info("Generating CWT cellstreams")
     cursor = 0  # position in block to process
+    
+    if rich_progress:
+        task = rich_progress.add_task(f"[cyan]Computing CWT for {rich_cell_name}...", total=blocks)
 
-    for b in tqdm(range(blocks)):
+    for b in tqdm(range(blocks), desc="CWT Blocks", leave=False, disable=disable_tqdm):
         this_block_size = block_size + (1 if b < remainder else 0)
         end = cursor + this_block_size
         block = img[cursor:end]  # (this_block_size, C, T)
@@ -398,6 +405,11 @@ def generate_cwt_image_cellstreams(
                 val = block_result[c][k]  # (this_block_size, num_filter_banks, T)
                 final[c][k][cursor:end] = val
         cursor = end
+        if rich_progress:
+            rich_progress.advance(task)
+            
+    if rich_progress:
+        rich_progress.remove_task(task)
 
     # reshape
     for c in channel_outputs:

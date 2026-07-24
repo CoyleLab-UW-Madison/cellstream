@@ -43,8 +43,9 @@ data = cellstream.cwt.process_folder_cwt_cellstreams(
     
     ### zarr cropping options
     crop_zarrs=True,
+    #min_mask_size=350,
     return_timeseries=True,
-    crop_kwargs={"padding_fraction": 0.2, "show_progress": True}
+    crop_kwargs={"padding_fraction": 0.2, "show_progress": True, "min_mask_size": 100}
 )
 
 print("\n--- Folder Processing Complete ---")
@@ -52,48 +53,45 @@ print(f"Dataframe shape: {data.shape}")
 print("\nFirst few rows of extracted single-cell CWT trajectories:")
 print(data.head())
 
-# Filter for the first filter bank
-bank0_data = data[data["filter_bank"] == 0]
-
-# Example visualization: Average minE amplitude vs average minD amplitude per cell
-if not bank0_data.empty:
-    print("\nPlotting average minE amplitude vs minD amplitude...")
+if not data.empty:
+    # Filter for the first filter bank
+    bank0_data = data[data.get("filter_bank", 0) == 0] if "filter_bank" in data.columns else data
     
-    # Calculate means over time for each cell
-    mean_stats = bank0_data.groupby(['image_filename', 'cell_id', 'channel', 'feature'])['mean'].mean().reset_index()
-    
-    # Pivot to get features as columns
-    pivot_stats = mean_stats.pivot(index=['image_filename', 'cell_id'], columns=['channel', 'feature'], values='mean').reset_index()
-    
-    # Flatten multi-level columns
-    pivot_stats.columns = [f'{col[0]}_{col[1]}' if col[1] else col[0] for col in pivot_stats.columns]
-    
-    plt.figure(figsize=(8, 6))
-    plt.scatter(
-        pivot_stats['minD_amp'], 
-        pivot_stats['minE_amp'],
-        alpha=0.7
-    )
-    plt.xlabel("Mean minD Amplitude (CWT)")
-    plt.ylabel("Mean minE Amplitude (CWT)")
-    plt.title("minD vs minE Amplitude across folder")
-    plt.grid(True, alpha=0.3)
-    plt.show()
-
-    # And also for frequency
-    plt.figure(figsize=(8, 6))
-    plt.scatter(
-        pivot_stats['minD_freq'], 
-        pivot_stats['minE_phase_difference'],
-        alpha=0.7
-    )
-    plt.xlabel("Mean minD Frequency (CWT)")
-    plt.ylabel("Mean minE Phase Shift (CWT)")
-    plt.title("minD vs minE Amplitude across folder")
-    plt.grid(True, alpha=0.3)
-    plt.show()
-
-
-    print("Plots displayed.")
+    # Example visualization: Average minE amplitude vs average minD amplitude per cell
+    if not bank0_data.empty:
+        print("\nPlotting average minE amplitude vs minD amplitude...")
+        
+        # Calculate means over time for each cell
+        mean_stats = bank0_data.groupby(['image_filename', 'cell_id', 'channel', 'feature'])['mean'].mean().reset_index()
+        
+        # Pivot to get features as columns
+        pivot_stats = mean_stats.pivot(index=['image_filename', 'cell_id'], columns=['channel', 'feature'], values='mean').reset_index()
+        
+        # Flatten multi-level columns
+        pivot_stats.columns = ['_'.join(col).strip() if isinstance(col, tuple) and col[0] else col[1] if isinstance(col, tuple) else col for col in pivot_stats.columns]
+        
+        # Plot
+        try:
+            plt.figure(figsize=(10, 8))
+            
+            # Use 'minE_amp' and 'minD_amp' if present, adapt if column names differ based on the flattening
+            x_col = next((c for c in pivot_stats.columns if 'minD' in c and 'amp' in c), None)
+            y_col = next((c for c in pivot_stats.columns if 'minE' in c and 'amp' in c), None)
+            
+            if x_col and y_col:
+                plt.scatter(pivot_stats[x_col], pivot_stats[y_col], alpha=0.6, edgecolors='w', s=50)
+                plt.title('Average minE Amp vs minD Amp (Filter Bank 0)')
+                plt.xlabel(f'Average {x_col}')
+                plt.ylabel(f'Average {y_col}')
+                plt.grid(True, linestyle='--', alpha=0.7)
+                plt.tight_layout()
+                plt.savefig('cwt_folder_scatter.png')
+                print("Saved example scatter plot to 'cwt_folder_scatter.png'")
+            else:
+                print(f"Could not find required columns for scatter plot. Available columns: {pivot_stats.columns}")
+        except Exception as e:
+            print(f"Plotting failed: {e}")
+    else:
+        print("\nNo data for filter_bank 0.")
 else:
     print("No data extracted.")
