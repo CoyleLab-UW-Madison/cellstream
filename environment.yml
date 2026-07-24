@@ -23,6 +23,7 @@ dependencies:
   # Image analysis and GUI dependencies
   - napari
   - pyqt
+  - rich
   - tifffile
   - zarr
   - matplotlib

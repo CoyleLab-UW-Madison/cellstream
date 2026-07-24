@@ -13,6 +13,7 @@ dependencies = [
     "tifffile",
     "nd2",
     "tqdm",
+    "rich",
     "ssqueezepy",
     "zarr",
     "pyarrow"
