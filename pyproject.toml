@@ -17,7 +17,6 @@ dependencies = [
     "ssqueezepy",
     "zarr",
     "pyarrow",
-    "torch",
     "scipy",
 ]
 
