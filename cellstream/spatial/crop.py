@@ -474,52 +474,6 @@ def crop_zarr_from_masks(
     if rich_progress is not None:
         rich_progress.remove_task(cell_task)
 
-        # 6g_2. Generate and write thumbnail (mean projection of timeseries or fallback spatial array)
-        thumbnail = None
-        y_slice = slice(y_min_p, y_max_p)
-        x_slice = slice(x_min_p, x_max_p)
-        
-        if "timeseries" in features_dict:
-            ts = _to_numpy(features_dict["timeseries"])
-            if ts.ndim >= 2 and ts.shape[-2:] == spatial_shape:
-                cropped_ts = ts[..., y_slice, x_slice]
-                # Compute mean over time dimension (axis 0)
-                thumbnail = cropped_ts.mean(axis=0)
-        else:
-            # Fallback to the first spatial array we find in the dict
-            fallback_arr = _find_first_spatial_array(features_dict, spatial_shape)
-            if fallback_arr is not None:
-                cropped_arr = fallback_arr[..., y_slice, x_slice]
-                non_spatial_axes = tuple(range(cropped_arr.ndim - 2))
-                thumbnail = cropped_arr.mean(axis=non_spatial_axes) if non_spatial_axes else cropped_arr
-
-        if thumbnail is not None:
-            if hasattr(cell_group, "create_array"):
-                thumb_arr = cell_group.create_array(
-                    name="thumbnail", shape=thumbnail.shape, dtype=thumbnail.dtype,
-                    chunks=True, compressor=compressor, overwrite=True,
-                )
-            else:
-                thumb_arr = cell_group.create_dataset(
-                    name="thumbnail", shape=thumbnail.shape, dtype=thumbnail.dtype,
-                    chunks=True, compressor=compressor, overwrite=True,
-                )
-            thumb_arr[:] = thumbnail
-
-        # 6h. Crop and write all feature arrays
-        y_slice = slice(y_min_p, y_max_p)
-        x_slice = slice(x_min_p, x_max_p)
-        _crop_and_write_recursive(
-            features_dict, cell_group, y_slice, x_slice,
-            spatial_shape, compressor,
-        )
-
-        logger.debug(
-            "cell_%d: centroid=(%.1f, %.1f), area=%d, crop=%s",
-            label_id, cy, cx, area,
-            [y_max_p - y_min_p, x_max_p - x_min_p],
-        )
-
     logger.info(
         "Wrote %d cell crops to %s", len(labels), output_path,
     )

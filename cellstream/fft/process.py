@@ -295,6 +295,11 @@ def process_folder_cellstreams(images_directory, masks_directory, dataframe_outp
     all_data : pandas.DataFrame
         Combined DataFrame of all per-cell results from the folder.
     """
+    # Support 'min_mask_size' alias for 'min_area'
+    if "min_mask_size" in kwargs:
+        val = kwargs.pop("min_mask_size")
+        if min_area is None:
+            min_area = val
 
     images = sorted(os.listdir(images_directory))
 

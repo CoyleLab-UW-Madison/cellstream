@@ -59,6 +59,12 @@ def process_cwt_image_cellstreams(
     Full CWT-based processing pipeline for a single image stack and mask set.
     Generates a tidy pandas DataFrame containing extracted single-cell trajectories.
     """
+    # Support 'min_mask_size' alias for 'min_area'
+    if "min_mask_size" in ssqueezepy_cwt_kwargs:
+        val = ssqueezepy_cwt_kwargs.pop("min_mask_size")
+        if min_area is None:
+            min_area = val
+            
     image = normalize_dims(image, 1)
     
     if min_area is not None:
@@ -268,6 +274,12 @@ def process_folder_cwt_cellstreams(images_directory, masks_directory, dataframe_
     """
     Batch process all images and masks in a folder using CWT feature extraction.
     """
+    # Support 'min_mask_size' alias for 'min_area'
+    if "min_mask_size" in kwargs:
+        val = kwargs.pop("min_mask_size")
+        if min_area is None:
+            min_area = val
+            
     images = sorted(os.listdir(images_directory))
     data = []
     

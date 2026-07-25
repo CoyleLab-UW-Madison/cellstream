@@ -16,13 +16,15 @@ dependencies = [
     "rich",
     "ssqueezepy",
     "zarr",
-    "pyarrow"
+    "pyarrow",
+    "torch",
+    "scipy",
 ]
 
 [project.optional-dependencies]
 registration = ["pystackreg"]
 filters = []
-profiling = ["psutil", "scipy"]
+profiling = ["psutil"]
 viz = ["napari"]
 all = ["cellstream[registration,filters,profiling,viz]"]
 

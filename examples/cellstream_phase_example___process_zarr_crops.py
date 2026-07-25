@@ -27,7 +27,7 @@ def main():
         process_zarr_store(
             zarr_path=zarr_path,
             force=True, #overwrite existing phase features
-            phase_features_to_process=["winding_number", "velocity", "ftle_forward", "ftle_reverse"],
+            phase_features_to_process=["winding_number", "velocity", "ftle_forward", "ftle_backward"],
             smooth_sigma=1.0,
             defect_window_size=3,
         )
