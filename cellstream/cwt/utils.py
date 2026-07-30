@@ -310,6 +310,14 @@ def generate_cwt_image_cellstreams(
     # gpu environment setup for squeezepy
     os.environ["SSQ_GPU"] = "1" if use_gpu else "0"
 
+    w_val = ssqueezepy_cwt_kwargs.get("wavelet", None)
+    if isinstance(w_val, str) and w_val.strip().startswith("("):
+        import ast
+        try:
+            ssqueezepy_cwt_kwargs["wavelet"] = ast.literal_eval(w_val.strip())
+        except Exception:
+            pass
+
     rich_progress = ssqueezepy_cwt_kwargs.pop("rich_progress", None)
     rich_cell_name = ssqueezepy_cwt_kwargs.pop("rich_cell_name", "cell")
     disable_tqdm = rich_progress is not None
