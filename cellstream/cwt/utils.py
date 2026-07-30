@@ -62,6 +62,7 @@ def query_cwt_block(
 
     # Force environment variable BEFORE import
     os.environ["SSQ_GPU"] = "1" if use_gpu else "0"
+    ssqueezepy_cwt_kwargs.setdefault("show_progress", False)
     from ssqueezepy import cwt
 
     if channel_outputs is None:
@@ -248,7 +249,7 @@ def _infer_blocks(
                     "GPU not available, falling back to default block size of 10."
                 )
                 return 10
-
+        ssqueezepy_cwt_kwargs.setdefault("show_progress", False)
         _, scales = cwt(dummy_input, **ssqueezepy_cwt_kwargs)
         num_scales = len(scales)
         

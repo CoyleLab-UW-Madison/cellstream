@@ -167,18 +167,26 @@ def generate_phase_features(
         mask = mask.to(device)
         
     rich_progress = kwargs.get('rich_progress', None)
+    rich_sub_task = kwargs.get('rich_sub_task', None)
     rich_cell_name = kwargs.get('rich_cell_name', 'cell')
     disable_tqdm = rich_progress is not None
+    
+    own_task = False
+    task = None
+    if rich_progress:
+        if rich_sub_task is not None:
+            task = rich_sub_task
+        else:
+            task = rich_progress.add_task(f"[cyan]Processing Phase for {rich_cell_name}...", total=None)
+            own_task = True
         
     features = {}
     
     # 1. Defects (Winding Number Field)
     if 'winding_number' in phase_features_to_process:
-        if rich_progress:
-            task = rich_progress.add_task(f"[cyan]Computing Winding Numbers for {rich_cell_name}...", total=None)
+        if rich_progress and task:
+            rich_progress.update(task, description=f"[cyan]Computing Winding Numbers for {rich_cell_name}...")
         wn = winding_number(phase, n=defect_window_size, device=device, disable_tqdm=disable_tqdm)
-        if rich_progress:
-            rich_progress.remove_task(task)
         features['winding_number'] = wn.cpu().numpy()
     
     # Needs velocity?
@@ -188,11 +196,9 @@ def generate_phase_features(
     ])
     
     if needs_vel:
-        if rich_progress:
-            task = rich_progress.add_task(f"[cyan]Computing Velocity for {rich_cell_name}...", total=None)
+        if rich_progress and task:
+            rich_progress.update(task, description=f"[cyan]Computing Velocity for {rich_cell_name}...")
         v, speed, wavenumber = phase_velocity(phase, smooth_sigma=smooth_sigma, device=device, disable_tqdm=disable_tqdm)
-        if rich_progress:
-            rich_progress.remove_task(task)
             
         if 'velocity' in phase_features_to_process:
             features['velocity'] = v.cpu().numpy()
@@ -202,42 +208,37 @@ def generate_phase_features(
             features['wavenumber'] = wavenumber.cpu().numpy()
             
         if 'ftle_forward' in phase_features_to_process:
-            if rich_progress:
-                task = rich_progress.add_task(f"[cyan]Computing Forward FTLE for {rich_cell_name}...", total=None)
+            if rich_progress and task:
+                rich_progress.update(task, description=f"[cyan]Computing Forward FTLE for {rich_cell_name}...")
             ftle_fwd = compute_ftle(v, integration_time=ftle_integration_time, device=device, mask=mask, backward=False)
-            if rich_progress:
-                rich_progress.remove_task(task)
             features['ftle_forward'] = ftle_fwd.cpu().numpy()
             
         if 'ftle_backward' in phase_features_to_process:
-            if rich_progress:
-                task = rich_progress.add_task(f"[cyan]Computing Backward FTLE for {rich_cell_name}...", total=None)
+            if rich_progress and task:
+                rich_progress.update(task, description=f"[cyan]Computing Backward FTLE for {rich_cell_name}...")
             ftle_bwd = compute_ftle(v, integration_time=ftle_integration_time, device=device, mask=mask, backward=True)
-            if rich_progress:
-                rich_progress.remove_task(task)
             features['ftle_backward'] = ftle_bwd.cpu().numpy()
             
         if 'streamlines' in phase_features_to_process:
-            if rich_progress:
-                task = rich_progress.add_task(f"[cyan]Tracing Streamlines for {rich_cell_name}...", total=None)
+            if rich_progress and task:
+                rich_progress.update(task, description=f"[cyan]Tracing Streamlines for {rich_cell_name}...")
             streams = generate_streamlines(
                 v, num_particles=stream_particles, decay=stream_decay, 
                 device=device, mask=mask, inject_rate=stream_inject_rate
             )
-            if rich_progress:
-                rich_progress.remove_task(task)
             features['streamlines'] = streams.cpu().numpy()
             
         if 'phase_streamlines' in phase_features_to_process:
-            if rich_progress:
-                task = rich_progress.add_task(f"[cyan]Tracing Phase Streamlines for {rich_cell_name}...", total=None)
+            if rich_progress and task:
+                rich_progress.update(task, description=f"[cyan]Tracing Phase Streamlines for {rich_cell_name}...")
             p_streams = generate_phase_colored_streamlines(
                 v, phase, num_particles=stream_particles, decay=stream_decay, 
                 device=device, mask=mask, inject_rate=stream_inject_rate
             )
-            if rich_progress:
-                rich_progress.remove_task(task)
             features['phase_streamlines'] = p_streams.cpu().numpy()
+
+    if rich_progress and own_task and task:
+        rich_progress.remove_task(task)
 
     # Store processing parameters for reproducibility (P3)
     features['_attrs'] = {
