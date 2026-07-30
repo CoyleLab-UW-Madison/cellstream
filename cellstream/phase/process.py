@@ -130,11 +130,12 @@ def process_cell(
     
     # Try to find a mask (either in this group or passed from parent)
     mask = None
-    if 'mask' in cell_group:
-        mask = torch.from_numpy(cell_group['mask'][:].astype('float32'))
-    elif parent_mask is not None:
-        mask = parent_mask
-        
+    if kwargs.get('use_mask', True):
+        if 'mask' in cell_group:
+            mask = torch.from_numpy(cell_group['mask'][:].astype('float32'))
+        elif parent_mask is not None:
+            mask = parent_mask
+            
     if mask is not None:
         mask = mask.squeeze()
 

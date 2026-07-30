@@ -112,6 +112,7 @@ def generate_phase_features(
     stream_particles: int = 20000,
     stream_decay: float = 0.85,
     stream_inject_rate: float = 0.05,
+    use_mask: bool = True,
     **kwargs
 ):
     """
@@ -134,6 +135,7 @@ def generate_phase_features(
         stream_particles: Number of tracer particles for streamline generation.
         stream_decay: Exponential decay factor for streamline tails.
         stream_inject_rate: Fraction of particles to inject per frame.
+        use_mask: Whether to apply mask filtering to phase features. Default True.
         
     Returns:
         dict  — keys are the computed feature names, values are numpy arrays.
@@ -156,6 +158,9 @@ def generate_phase_features(
 
     if phase_features_to_process is None:
         phase_features_to_process = ['velocity', 'speed', 'ftle_forward', 'ftle_backward', 'winding_number']
+
+    if not use_mask:
+        mask = None
 
     phase = phase.to(device)
     if mask is not None:
