@@ -37,7 +37,7 @@ from .utils import normalize_dims, downsample, normalize_histogram, convolve_alo
 from .analysis import extract_single_cell_data, create_dataframe, reshape_to_longform
 from .viz import color_by_axis, patch_napari_for_torch, map_data_onto_mask
 from .phase import winding_number
-from .spatial import crop_zarr_from_masks
+from .spatial import crop_zarr_from_masks, paint_masks_with_property
 
 __all__ = [
     "io",
@@ -75,4 +75,5 @@ __all__ = [
     "patch_napari_for_torch",
     "winding_number",
     "crop_zarr_from_masks",
+    "paint_masks_with_property",
 ]
