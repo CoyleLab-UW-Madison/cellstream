@@ -10,7 +10,7 @@ import os
 from cellstream.phase.process import process_zarr_store
 
 def main():
-    crops_dir = "zarr_crops"
+    crops_dir = "../zarr_crops"
     
     if not os.path.exists(crops_dir):
         print(f"Please run zarr_pipeline_1_extract_crops.py first to create {crops_dir}/.")

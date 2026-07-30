@@ -15,11 +15,11 @@ from cellstream.spatial import process_folder_to_crop_zarrs
 
 def main():
     # Directories containing your raw TIFFs and masks
-    images_dir = "images"
-    masks_dir = "masks"
+    images_dir = "../images"
+    masks_dir = "../masks"
     
     # Where the Zarr stores will be saved
-    output_dir = "zarr_crops"
+    output_dir = "../zarr_crops"
     
     # We will name the extracted raw array "timeseries"
     channel_name = "timeseries"

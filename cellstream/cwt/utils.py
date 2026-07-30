@@ -376,11 +376,20 @@ def generate_cwt_image_cellstreams(
         freqs_lookup = scale_to_freq(scales, wavelet=wavelet, N=N, fs=fs).astype("float32")
 
     logger.info("Generating CWT cellstreams")
-    cursor = 0  # position in block to process
+    rich_progress = ssqueezepy_cwt_kwargs.pop("rich_progress", None)
+    rich_sub_task = ssqueezepy_cwt_kwargs.pop("rich_sub_task", None)
+    disable_tqdm = rich_progress is not None
+    rich_cell_name = ssqueezepy_cwt_kwargs.pop("rich_cell_name", "cell")
     
     if rich_progress:
-        task = rich_progress.add_task(f"[cyan]Computing CWT for {rich_cell_name}...", total=blocks)
+        if rich_sub_task is not None:
+            task = rich_sub_task
+            rich_progress.update(task, description=f"[cyan]Computing CWT for {rich_cell_name}...", total=blocks, completed=0)
+        else:
+            task = rich_progress.add_task(f"[cyan]Computing CWT for {rich_cell_name}...", total=blocks)
 
+    cursor = 0  # position in block to process
+    
     for b in tqdm(range(blocks), desc="CWT Blocks", leave=False, disable=disable_tqdm):
         this_block_size = block_size + (1 if b < remainder else 0)
         end = cursor + this_block_size
@@ -409,7 +418,8 @@ def generate_cwt_image_cellstreams(
             rich_progress.advance(task)
             
     if rich_progress:
-        rich_progress.remove_task(task)
+        if rich_sub_task is None:
+            rich_progress.remove_task(task)
 
     # reshape
     for c in channel_outputs:

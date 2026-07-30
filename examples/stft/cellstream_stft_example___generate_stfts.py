@@ -1,7 +1,7 @@
 import cellstream
 import torch
 
-timeseries_image = cellstream.image.load_image("images/example_timeseries_mini_0.tif")
+timeseries_image = cellstream.image.load_image("../images/example_timeseries_mini_0.tif")
 
 ## perform STFT filter-banking, using 1 bank across frequency bins 0-30
 

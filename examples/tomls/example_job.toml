@@ -1,0 +1,23 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# cellstream Job Configuration Example: Single CWT Job
+#
+# Usage:
+#   cellstream run examples/example_job.toml
+#   cellstream run examples/example_job.toml --dry-run
+# ─────────────────────────────────────────────────────────────────────────────
+
+[defaults]
+images = "../images"
+masks = "../masks"
+output = "../results"
+use_gpu = true
+
+# ── CWT feature extraction and per-cell Zarr crop generation ──
+[[jobs]]
+type = "cwt"
+carrier_channel = 0
+min_scale = 80
+max_scale = 180
+num_filter_banks = 1
+bank_method = "max_pool"
+crop_zarrs = true

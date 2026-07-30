@@ -153,11 +153,16 @@ def batch_profile_pixels(
     max_fft_bin=50,
     fft_batch_size='auto',
     show_progress=True,
-    progress_callback=None
+    progress_callback=None,
+    use_gpu=None,
+    **kwargs
 ):
     """
     Profiles pixels for a batch of images and aggregates them into a single DataFrame.
     """
+    if device is None and use_gpu is not None:
+        device = 'cuda' if (use_gpu and torch.cuda.is_available()) else 'cpu'
+
     run_metadata = locals().copy()
     all_data_frames = []
     

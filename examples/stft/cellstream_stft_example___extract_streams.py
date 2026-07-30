@@ -9,7 +9,7 @@ import torch
 
 import cellstream
 
-timeseries_image = cellstream.image.load_image("timeseries_for_cwt.tif")
+timeseries_image = cellstream.image.load_image("../cwt/timeseries_for_cwt.tif")
 
 features = cellstream.stft.generate_stft_image_cellstreams(
     ###image file
@@ -58,7 +58,7 @@ phase_features = torch.cat(
 )
 
 # load track-masks
-track_masks = cellstream.image.load_masks("timeseries_masks_for_cwt.tif")
+track_masks = cellstream.image.load_masks("../cwt/timeseries_masks_for_cwt.tif")
 
 # extract single-cell trajectories
 amp_signaling_cellstreams, _ = cellstream.stft.extract_stft_cellstreams(

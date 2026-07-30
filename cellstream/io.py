@@ -245,3 +245,67 @@ def _write_dict_to_zarr_group(group, d, chunks=True, compressor=None):
                 arr = group.create_dataset(name=key, shape=v.shape, dtype=v.dtype, 
                                            chunks=chunks, compressor=compressor, overwrite=True)
             arr[:] = v
+
+def write_unified_zarr(
+    output_path,
+    raw_data=None,
+    processed_data=None,
+    features_dict=None,
+    masks=None,
+    save_full_field=False,
+    save_raw_timeseries=False,
+    save_processed_timeseries=False,
+    crop_zarrs=False,
+    crop_kwargs=None,
+):
+    import os
+    import shutil
+    import time
+    import zarr
+    
+    if os.path.exists(str(output_path)):
+        for attempt in range(5):
+            try:
+                shutil.rmtree(str(output_path))
+                break
+            except Exception as e:
+                if attempt == 4:
+                    raise RuntimeError(f"Could not delete existing zarr store at {output_path} due to file lock: {e}.") from e
+                time.sleep(0.5)
+                
+    root = zarr.open_group(str(output_path), mode="w")
+    
+    if save_raw_timeseries and raw_data is not None:
+        _write_dict_to_zarr_group(root, {"raw_timeseries": raw_data})
+        
+    if save_processed_timeseries and processed_data is not None:
+        _write_dict_to_zarr_group(root, {"processed": processed_data})
+        
+    if save_full_field and features_dict is not None:
+        _write_dict_to_zarr_group(root, features_dict)
+        
+    if masks is not None:
+        _write_dict_to_zarr_group(root, {"masks": masks})
+        
+    if crop_zarrs and masks is not None:
+        from .spatial.crop import crop_zarr_from_masks
+        cells_group = root.create_group("cells")
+        ckw = dict(crop_kwargs or {})
+        
+        crop_dict = {}
+        if raw_data is not None:
+            crop_dict["raw_timeseries"] = raw_data
+        if processed_data is not None:
+            crop_dict["processed"] = processed_data
+        if features_dict is not None:
+            crop_dict.update(features_dict)
+            
+        crop_zarr_from_masks(
+            features=crop_dict,
+            label_image=masks,
+            output_path=cells_group,
+            **ckw
+        )
+        
+    return root
+

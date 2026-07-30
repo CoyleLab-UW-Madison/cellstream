@@ -120,6 +120,10 @@ def process_image_cellstreams(
         The root zarr group of the cropped store (if ``crop_zarrs=True``).
     """
 
+    save_full_field = kwargs.pop("save_full_field", False)
+    save_raw_timeseries = kwargs.pop("save_raw_timeseries", False)
+    save_processed_timeseries = kwargs.pop("save_processed_timeseries", False)
+
     image = normalize_dims(image, 1)
     
     if min_area is not None:
@@ -139,6 +143,8 @@ def process_image_cellstreams(
     mean_image = image.mean(axis=0)
 
     logger.info("Generating FFT features...")
+    if save_processed_timeseries:
+        kwargs["return_timeseries"] = True
     fft_features = generate_fft_features(image, **kwargs)
 
     logger.info(f"Querying FFT features using channel {carrier_index} as carrier...")
@@ -170,11 +176,10 @@ def process_image_cellstreams(
     logger.info("making dataframe...")
     df = create_dataframe(results, channel_names, image_filename, masks_filename)
 
-    # --- Optional cropping ---
+    # --- Optional Saving / Cropping ---
     crop_root = None
-    if crop_zarrs:
-        from ..spatial.crop import crop_zarr_from_masks
-        from ..io import _sanitize_metadata
+    if crop_zarrs or save_full_field or save_raw_timeseries or save_processed_timeseries:
+        from ..io import write_unified_zarr, _sanitize_metadata
 
         if crop_output_path is None:
             base = os.path.splitext(image_filename)[0] if image_filename else "image"
@@ -192,69 +197,78 @@ def process_image_cellstreams(
             while primary_mask.dim() > 2:
                 primary_mask = primary_mask.max(dim=0).values if hasattr(primary_mask.max(dim=0), 'values') else primary_mask.max(dim=0)[0] if isinstance(primary_mask.max(dim=0), tuple) else primary_mask.max(dim=0)
 
-        # Restructure features to match the hierarchy produced by process_cell
+        # Restructure features
         parent_key = "timeseries" if "timeseries" in fft_features else "raw_timeseries"
-        structured_features = {
-            "raw_timeseries": image,
+        features_dict = {
             "fft": {
                 parent_key: {},
                 "_attrs": fft_features.get("_attrs", {})
             }
         }
-        if "timeseries" in fft_features:
-            structured_features["timeseries"] = fft_features["timeseries"]
             
         for k, v in fft_features.items():
             if k in ["raw_timeseries", "timeseries", "_attrs"]:
                 continue
-            structured_features["fft"][parent_key][f"channel_{k}"] = v
+            features_dict["fft"][parent_key][f"channel_{k}"] = v
 
-        logger.info(f"Cropping features to per-cell zarr at {crop_output_path}...")
-        crop_root = crop_zarr_from_masks(
-            structured_features, primary_mask, crop_output_path, **ckw,
+        processed_data = fft_features.get("timeseries", None)
+
+        logger.info(f"Writing unified Zarr to {crop_output_path}...")
+        crop_root = write_unified_zarr(
+            output_path=crop_output_path,
+            raw_data=image,
+            processed_data=processed_data,
+            features_dict=features_dict,
+            masks=primary_mask,
+            save_full_field=save_full_field,
+            save_raw_timeseries=save_raw_timeseries,
+            save_processed_timeseries=save_processed_timeseries,
+            crop_zarrs=crop_zarrs,
+            crop_kwargs=ckw,
         )
 
         # Attach per-cell extracted stats from DataFrame to each cell group
-        keys = list(crop_root.group_keys())
-        
-        rich_progress = kwargs.get("rich_progress")
-        attach_task = None
-        if ckw.get("show_progress", False):
-            if rich_progress is not None:
-                attach_task = rich_progress.add_task("[bold green]Attaching FFT metadata...", total=len(keys))
-                iterable = keys
-            elif RICH_AVAILABLE:
-                from rich.progress import track
-                iterable = track(keys, description="[bold green]Attaching FFT metadata...", console=console)
-            else:
-                from tqdm.auto import tqdm
-                iterable = tqdm(keys, desc="Attaching FFT metadata", leave=False)
-        else:
-            iterable = keys
+        if crop_zarrs and crop_root is not None and "cells" in crop_root:
+            keys = list(crop_root["cells"].group_keys())
             
-        for cell_key in iterable:
-            if rich_progress is not None and attach_task is not None:
-                rich_progress.advance(attach_task)
-            cell_group = crop_root[cell_key]
-            label_id = cell_group.attrs.get("label_id", None)
-            if label_id is not None and label_id in df["cell_id"].values:
-                row = df[df["cell_id"] == label_id].iloc[0]
-                extracted = {}
-                for col in row.index:
-                    if col in ("cell_id", "image_filename", "mask_filename"):
-                        continue
-                    val = row[col]
-                    # Convert numpy types to Python builtins for zarr attrs
-                    if hasattr(val, "item"):
-                        val = val.item()
-                    extracted[col] = val
-                try:
-                    # Batch update the Zarr attributes in a single disk IO write
-                    cell_group.attrs.update({
-                        f"extracted_{k}": v for k, v in _sanitize_metadata(extracted).items()
-                    })
-                except Exception as e:
-                    logger.warning(f"Could not attach attributes to {cell_key}: {e}")
+            rich_progress = kwargs.get("rich_progress")
+            attach_task = None
+            if ckw.get("show_progress", False):
+                if rich_progress is not None:
+                    attach_task = rich_progress.add_task("[bold green]Attaching FFT metadata...", total=len(keys))
+                    iterable = keys
+                elif RICH_AVAILABLE:
+                    from rich.progress import track
+                    iterable = track(keys, description="[bold green]Attaching FFT metadata...", console=console)
+                else:
+                    from tqdm.auto import tqdm
+                    iterable = tqdm(keys, desc="Attaching FFT metadata", leave=False)
+            else:
+                iterable = keys
+                
+            for cell_key in iterable:
+                if rich_progress is not None and attach_task is not None:
+                    rich_progress.advance(attach_task)
+                cell_group = crop_root["cells"][cell_key]
+                label_id = cell_group.attrs.get("label_id", None)
+                if label_id is not None and label_id in df["cell_id"].values:
+                    row = df[df["cell_id"] == label_id].iloc[0]
+                    extracted = {}
+                    for col in row.index:
+                        if col in ("cell_id", "image_filename", "mask_filename"):
+                            continue
+                        val = row[col]
+                        # Convert numpy types to Python builtins for zarr attrs
+                        if hasattr(val, "item"):
+                            val = val.item()
+                        extracted[col] = val
+                    try:
+                        # Batch update the Zarr attributes in a single disk IO write
+                        cell_group.attrs.update({
+                            f"extracted_{k}": v for k, v in _sanitize_metadata(extracted).items()
+                        })
+                    except Exception as e:
+                        logger.warning(f"Could not attach attributes to {cell_key}: {e}")
 
     # --- Save DataFrame ---
     if dataframe_output_path is not None:
@@ -363,6 +377,13 @@ def process_folder_cellstreams(images_directory, masks_directory, dataframe_outp
                 image = load_image(image_path)
                 masks = load_masks(mask_path)
     
+                img_kwargs = kwargs.copy()
+                if img_kwargs.get("crop_zarrs") and "crop_output_path" not in img_kwargs:
+                    crop_dir = img_kwargs.pop("crop_output_dir", images_directory)
+                    img_kwargs["crop_output_path"] = os.path.join(crop_dir, f"{name}_crops.zarr")
+                else:
+                    img_kwargs.pop("crop_output_dir", None)
+                    
                 try:
                     pos_data_for_image = process_image_cellstreams(
                         image,
@@ -370,7 +391,7 @@ def process_folder_cellstreams(images_directory, masks_directory, dataframe_outp
                         image_filename=image_filename,
                         masks_filename=masks_filename,
                         min_area=min_area,
-                        **kwargs,
+                        **img_kwargs,
                     )
                     df_part = pos_data_for_image[0] if isinstance(pos_data_for_image, tuple) else pos_data_for_image
                     data.append(df_part)
@@ -468,7 +489,16 @@ def process_cell(
         if raw_arr.ndim == 3:
             raw_arr = raw_arr.unsqueeze(1)
             
-        features = generate_fft_features(raw_arr, device=device, **kwargs)
+        kwargs_copy = kwargs.copy()
+        cutoff_frequency_bin = kwargs_copy.pop("cutoff_frequency_bin", 0)
+        carrier_index = kwargs_copy.pop("carrier_index", kwargs_copy.pop("carrier_channel", 0))
+        
+        features = generate_fft_features(raw_arr, device=device, **kwargs_copy)
+        
+        queried_features = query_fft_features(
+            features, cutoff_frequency_bin, carrier_index, **kwargs_copy
+        )
+        features.update(queried_features)
         
         target_group = fft_group.require_group(rk)
         
@@ -482,8 +512,9 @@ def process_cell(
                 
             chunks = (1, 1, feat_val.shape[-2], feat_val.shape[-1]) if feat_val.ndim >= 3 else True
             if feat_val.ndim == 3:
-                feat_val = np.expand_dims(feat_val, axis=1) # match CWT axis convention
-                chunks = (1, 1, feat_val.shape[2], feat_val.shape[3])
+                # Some queried features are (C, X, Y)
+                feat_val = np.expand_dims(feat_val, axis=0) # Make it (1, C, X, Y)
+                chunks = (1, feat_val.shape[1], feat_val.shape[-2], feat_val.shape[-1])
                 
             target_group.create_dataset(
                 feat_name, data=feat_val, chunks=chunks,
@@ -546,9 +577,177 @@ def process_cell(
         
     return processed_any, df_rows
 
-def process_zarr_store(zarr_path: str, force: bool = False, **kwargs):
+def process_zarr_store(zarr_path: str, force: bool = False, process_full_field: bool = False, **kwargs):
     logger.info(f"Opening Zarr store: {zarr_path}")
     store = zarr.open(zarr_path, mode='a')
+    
+    if process_full_field:
+        if "processed" in store:
+            full_field_arr = store["processed"]
+            parent_key = "processed"
+        elif "raw_timeseries" in store:
+            full_field_arr = store["raw_timeseries"]
+            parent_key = "raw_timeseries"
+        else:
+            logger.error("No raw_timeseries or processed found for full field processing.")
+            return False
+            
+        logger.info(f"Processing full-field for {zarr_path}")
+        image_tensor = torch.from_numpy(np.asarray(full_field_arr[:]).astype("float32"))
+        
+        if image_tensor.dim() == 3:
+            image_tensor = image_tensor.unsqueeze(1)
+            
+        device = kwargs.get("device", 'cuda' if torch.cuda.is_available() else 'cpu')
+        kwargs_no_device = {k: v for k, v in kwargs.items() if k not in [
+            "device", "process_full_field", "crop_zarrs", 
+            "images", "masks", "output", "input", "crop_output_dir", "dataframe_output_path",
+            "min_area", "min_mask_size"
+        ]}
+        
+        import contextlib
+        if RICH_AVAILABLE:
+            progress_ctx = Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                TaskProgressColumn(),
+                TimeElapsedColumn(),
+                TimeRemainingColumn(),
+                console=console
+            )
+        else:
+            progress_ctx = contextlib.nullcontext()
+            
+        with progress_ctx as progress:
+            if RICH_AVAILABLE:
+                kwargs_no_device['rich_progress'] = progress
+            fft_features = generate_fft_features(image_tensor, device=device, **kwargs_no_device)
+            
+            cutoff_frequency_bin = kwargs_no_device.pop("cutoff_frequency_bin", 0)
+            carrier_index = kwargs_no_device.pop("carrier_index", kwargs_no_device.pop("carrier_channel", 0))
+            
+            queried_features = query_fft_features(
+                fft_features, cutoff_frequency_bin, carrier_index, **kwargs_no_device
+            )
+            fft_features.update(queried_features)
+        
+            if RICH_AVAILABLE:
+                write_task = progress.add_task("[bold blue]Writing full-field FFT to Zarr...", total=None)
+                
+            fft_group = store.require_group("fft")
+            features_group = fft_group.require_group(parent_key)
+            
+            if "_attrs" in fft_features:
+                features_group.attrs.update(fft_features["_attrs"])
+                
+            for feat_name, feat_val in fft_features.items():
+                if feat_name in ["_attrs", "raw_timeseries", "timeseries"]:
+                    continue
+                feat_val_np = feat_val.detach().cpu().numpy() if hasattr(feat_val, 'detach') else np.asarray(feat_val)
+                chunks = (1, 1, feat_val_np.shape[-2], feat_val_np.shape[-1]) if feat_val_np.ndim >= 3 else True
+                if feat_val_np.ndim == 3:
+                    # Some queried features are (C, X, Y)
+                    feat_val_np = np.expand_dims(feat_val_np, axis=0) # Make it (1, C, X, Y)
+                    chunks = (1, feat_val_np.shape[1], feat_val_np.shape[-2], feat_val_np.shape[-1])
+                    
+                if feat_name in features_group:
+                    del features_group[feat_name]
+                features_group.create_dataset(
+                    feat_name, data=feat_val_np, chunks=chunks,
+                    compressor=zarr.Blosc(cname='zstd', clevel=3, shuffle=1)
+                )
+                
+            if RICH_AVAILABLE:
+                progress.update(write_task, total=1, completed=1, description="[bold green]Wrote full-field FFT to Zarr")
+            
+        if kwargs.get("crop_zarrs", False):
+            if "masks" in store:
+                masks = store["masks"][:]
+                from ..spatial.crop import crop_zarr_from_masks
+                
+                features_for_crop = {
+                    k: v for k, v in fft_features.items() if k not in ["raw_timeseries", "timeseries", "_attrs"]
+                }
+                if "_attrs" in fft_features:
+                    features_for_crop["_attrs"] = fft_features["_attrs"]
+                    
+                crop_dict = {
+                    "fft": {
+                        parent_key: features_for_crop
+                    }
+                }
+                ckw = kwargs.get("crop_kwargs", {})
+                for k in ["min_mask_size", "padding_fraction", "min_padding_px", "min_area"]:
+                    if k in kwargs:
+                        ckw[k if k != "min_area" else "min_mask_size"] = kwargs[k]
+                
+                crop_zarr_from_masks(
+                    features=crop_dict,
+                    label_image=masks,
+                    output_path=store.require_group("cells"),
+                    **ckw
+                )
+                
+                # --- Fast Metadata Extraction ---
+                try:
+                    masks_tensor = torch.from_numpy(masks) if not isinstance(masks, torch.Tensor) else masks
+                    if hasattr(masks_tensor, 'dim'):
+                        while masks_tensor.dim() > 2:
+                            masks_tensor = masks_tensor.max(dim=0).values if hasattr(masks_tensor.max(dim=0), 'values') else masks_tensor.max(dim=0)[0] if isinstance(masks_tensor.max(dim=0), tuple) else masks_tensor.max(dim=0)
+                    elif hasattr(masks_tensor, 'ndim'):
+                        while masks_tensor.ndim > 2:
+                            masks_tensor = masks_tensor.max(axis=0)
+                    
+                    from torch_scatter import scatter_mean, scatter_std
+                    flat_masks = masks_tensor.flatten().long().to(device)
+                    num_cells = int(flat_masks.max().item()) + 1
+                    
+                    fast_cell_summary = {}
+                    for feat_name, feat_tensor in fft_features.items():
+                        if feat_name in ["_attrs", "raw_timeseries", "timeseries"]: continue
+                        flat_feat = feat_tensor.reshape(*feat_tensor.shape[:-2], -1).to(device)
+                        
+                        means = scatter_mean(flat_feat, flat_masks, dim=-1, dim_size=num_cells)
+                        stds = scatter_std(flat_feat, flat_masks, dim=-1, dim_size=num_cells)
+                        
+                        means_np = means.detach().cpu().numpy()
+                        stds_np = stds.detach().cpu().numpy()
+                        
+                        if means_np.ndim == 3:
+                            # Shape: (F, C, num_cells) -> Average over F
+                            temp_mean = means_np.mean(axis=0)
+                            temp_std = stds_np.mean(axis=0)
+                        elif means_np.ndim == 2:
+                            # Shape: (C, num_cells)
+                            temp_mean = means_np
+                            temp_std = stds_np
+                        else:
+                            continue
+                            
+                        num_channels = temp_mean.shape[0]
+                        
+                        for c_idx in range(1, num_cells):
+                            for ch in range(num_channels):
+                                key = f"{feat_name}_ch{ch}"
+                                fast_cell_summary.setdefault(c_idx, {})[f"{key}_mean"] = float(temp_mean[ch, c_idx])
+                                fast_cell_summary[c_idx][f"{key}_std"] = float(temp_std[ch, c_idx])
+                                
+                    cells_group = store.require_group("cells")
+                    from ..io import _sanitize_metadata
+                    for cell_key in cells_group.keys():
+                        cell_group = cells_group[cell_key]
+                        label_id = cell_group.attrs.get("label_id", None)
+                        if label_id is not None and label_id in fast_cell_summary:
+                            cell_group.attrs.update({
+                                f"extracted_fft_{k}": v for k, v in _sanitize_metadata(fast_cell_summary[label_id]).items()
+                            })
+                except Exception as e:
+                    logger.warning(f"Failed to attach fast cell stats for FFT: {e}")
+            else:
+                logger.warning("No masks found, cannot crop.")
+                
+        return True
     
     if 'cells' in store:
         cells_group = store['cells']
@@ -601,7 +800,12 @@ def process_zarr_store(zarr_path: str, force: bool = False, **kwargs):
     error_count = 0
     
     with progress or tqdm(total=len(cell_ids), desc="Processing FFT") as pbar:
-        task = progress.add_task("[cyan]Processing FFT features...", total=len(cell_ids)) if progress else None
+        if progress:
+            task = progress.add_task("[cyan]Processing FFT features...", total=len(cell_ids))
+            sub_task = progress.add_task("[magenta]Computing FFT...", total=100)
+            kwargs['rich_sub_task'] = sub_task
+        else:
+            task = None
         
         t0 = time.time()
         for cell_id in cell_ids:

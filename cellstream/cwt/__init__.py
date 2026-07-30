@@ -12,6 +12,8 @@ from .utils import (
 from .process import (
     process_cwt_image_cellstreams,
     process_folder_cwt_cellstreams,
+    process_cell,
+    process_zarr_store,
 )
 
 __all__ = [
@@ -20,5 +22,8 @@ __all__ = [
     "extract_cwt_cellstreams",
     "process_cwt_image_cellstreams",
     "process_folder_cwt_cellstreams",
+    "process_cell",
+    "process_zarr_store",
 ]
+
 

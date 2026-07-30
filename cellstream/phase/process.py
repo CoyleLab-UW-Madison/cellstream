@@ -68,6 +68,7 @@ def process_cell(
     device: str = None,
     force_recompute: bool = False,
     parent_mask: torch.Tensor = None,
+    root_group: zarr.Group = None,
     **kwargs
 ):
     """
@@ -84,6 +85,9 @@ def process_cell(
     if device is None:
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
+    if root_group is None:
+        root_group = cell_group
+
     if 'phase' not in cell_group:
         # Check if phase exists in any subchannels (like minD, minE)
         # Load mask from top level if it exists, otherwise inherit from parent
@@ -95,7 +99,7 @@ def process_cell(
         for key in list(cell_group.keys()):
             subgroup = cell_group[key]
             if isinstance(subgroup, zarr.Group):
-                processed = process_cell(subgroup, force_recompute=force_recompute, device=device, parent_mask=top_mask, **kwargs)
+                processed = process_cell(subgroup, force_recompute=force_recompute, device=device, parent_mask=top_mask, root_group=root_group, **kwargs)
                 if processed:
                     any_processed = True
                 
@@ -139,7 +143,7 @@ def process_cell(
     
     # Validate shape — process_cell expects (T, Y, X)
     if phase.ndim != 3:
-        logger.warning(
+        logger.debug(
             f"Skipping {cell_group.name}: expected 3-D phase (T, Y, X), "
             f"got shape {tuple(phase.shape)}"
         )
@@ -164,7 +168,7 @@ def process_cell(
     # --- Write _attrs metadata for reproducibility (P3) ---
     attrs_dict = features.get('_attrs', {})
     if attrs_dict:
-        cell_group.attrs.update({'phase_processing': attrs_dict})
+        root_group.attrs.update({'phase_processing': attrs_dict})
     
     # --- Write Defects ---
     wn_np = features.get('winding_number')
@@ -247,7 +251,7 @@ def process_cell(
                         attrs_update[f"{key}_mean"] = float(temp_mean[c])
                         attrs_update[f"{key}_std"] = float(temp_std[c])
                         
-            cell_group.attrs.update({'phase_stats': attrs_update})
+            root_group.attrs.update({'phase_stats': attrs_update})
 
     if torch.cuda.is_available():
         torch.cuda.empty_cache()

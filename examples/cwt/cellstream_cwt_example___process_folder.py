@@ -9,8 +9,8 @@ pandas DataFrame and optionally creates Zarr stores containing per-cell spatial 
 import matplotlib.pyplot as plt
 import cellstream
 
-images_dir = "images"
-masks_dir = "masks"
+images_dir = "../images"
+masks_dir = "../masks"
 
 print("Processing folder of images with CWT...")
 data = cellstream.cwt.process_folder_cwt_cellstreams(

@@ -64,6 +64,11 @@ def process_cwt_image_cellstreams(
         val = ssqueezepy_cwt_kwargs.pop("min_mask_size")
         if min_area is None:
             min_area = val
+
+    save_full_field = ssqueezepy_cwt_kwargs.pop("save_full_field", False)
+    save_raw_timeseries = ssqueezepy_cwt_kwargs.pop("save_raw_timeseries", False)
+    save_processed_timeseries = ssqueezepy_cwt_kwargs.pop("save_processed_timeseries", False)
+    rich_progress = ssqueezepy_cwt_kwargs.get("rich_progress", None)
             
     image = normalize_dims(image, 1)
     
@@ -77,6 +82,9 @@ def process_cwt_image_cellstreams(
         image = downsample(image, downsample_by)
         masks = downsample(masks, downsample_by, is_mask=True)
         
+    if save_processed_timeseries:
+        ssqueezepy_cwt_kwargs["return_timeseries"] = True
+
     cwt_features = generate_cwt_image_cellstreams(
         image,
         min_scale=min_scale,
@@ -151,19 +159,18 @@ def process_cwt_image_cellstreams(
     else:
         df = pd.concat(dfs, ignore_index=True)
 
-    # --- Optional cropping ---
+    # --- Optional Saving / Cropping ---
     crop_root = None
-    if crop_zarrs:
-        from ..spatial.crop import crop_zarr_from_masks
-        from ..io import _sanitize_metadata
+    if crop_zarrs or save_full_field or save_raw_timeseries or save_processed_timeseries:
+        from ..io import write_unified_zarr, _sanitize_metadata
 
         if crop_output_path is None:
             base = os.path.splitext(image_filename)[0] if image_filename else "image"
             crop_output_path = f"{base}_cwt_crops.zarr"
 
         ckw = dict(crop_kwargs or {})
-        if "rich_progress" in ssqueezepy_cwt_kwargs:
-            ckw["rich_progress"] = ssqueezepy_cwt_kwargs["rich_progress"]
+        if rich_progress is not None:
+            ckw["rich_progress"] = rich_progress
         # Ensure mask is 2-D for crop_zarr_from_masks
         masks_2d = masks
         if hasattr(masks_2d, 'dim'):
@@ -173,86 +180,95 @@ def process_cwt_image_cellstreams(
             while masks_2d.ndim > 2:
                 masks_2d = masks_2d.max(axis=0)
                 
-        # Restructure features to match the hierarchy produced by process_cell
+        # Restructure features
         parent_key = "timeseries" if "timeseries" in cwt_features else "raw_timeseries"
-        structured_features = {
-            "raw_timeseries": image,
+        features_dict = {
             "cwt": {
                 parent_key: {},
                 "_attrs": cwt_features.get("_attrs", {})
             }
         }
-        if "timeseries" in cwt_features:
-            structured_features["timeseries"] = cwt_features["timeseries"]
             
         for k, v in cwt_features.items():
             if k in ["raw_timeseries", "timeseries", "_attrs"]:
                 continue
-            structured_features["cwt"][parent_key][f"channel_{k}"] = v
+            features_dict["cwt"][parent_key][f"channel_{k}"] = v
 
-        logger.info(f"Cropping CWT features to per-cell zarr at {crop_output_path}...")
-        crop_root = crop_zarr_from_masks(
-            structured_features, masks_2d, crop_output_path, **ckw,
+        processed_data = cwt_features.get("timeseries", None)
+
+        logger.info(f"Writing unified Zarr to {crop_output_path}...")
+        crop_root = write_unified_zarr(
+            output_path=crop_output_path,
+            raw_data=image,
+            processed_data=processed_data,
+            features_dict=features_dict,
+            masks=masks_2d,
+            save_full_field=save_full_field,
+            save_raw_timeseries=save_raw_timeseries,
+            save_processed_timeseries=save_processed_timeseries,
+            crop_zarrs=crop_zarrs,
+            crop_kwargs=ckw,
         )
         
         # Calculate raw expression means
-        import scipy.ndimage as ndi
-        img_np = image.detach().cpu().numpy() if hasattr(image, "detach") else np.asarray(image)
-        masks_2d_np = masks_2d.detach().cpu().numpy() if hasattr(masks_2d, "detach") else np.asarray(masks_2d)
-        
-        raw_means = {}
-        cell_ids = df["cell_id"].unique() if not df.empty else []
-        if len(cell_ids) > 0:
-            if img_np.ndim == 4: # T, C, Y, X
-                time_avg = img_np.mean(axis=0) # C, Y, X
-                for c in range(time_avg.shape[0]):
-                    means_c = ndi.mean(time_avg[c], labels=masks_2d_np, index=cell_ids)
+        if crop_zarrs and crop_root is not None and "cells" in crop_root:
+            import scipy.ndimage as ndi
+            img_np = image.detach().cpu().numpy() if hasattr(image, "detach") else np.asarray(image)
+            masks_2d_np = masks_2d.detach().cpu().numpy() if hasattr(masks_2d, "detach") else np.asarray(masks_2d)
+            
+            raw_means = {}
+            cell_ids = df["cell_id"].unique() if not df.empty else []
+            if len(cell_ids) > 0:
+                if img_np.ndim == 4: # T, C, Y, X
+                    time_avg = img_np.mean(axis=0) # C, Y, X
+                    for c in range(time_avg.shape[0]):
+                        means_c = ndi.mean(time_avg[c], labels=masks_2d_np, index=cell_ids)
+                        for i, cid in enumerate(cell_ids):
+                            raw_means.setdefault(cid, {})[f"raw_ch{c}_mean"] = float(means_c[i])
+                elif img_np.ndim == 3: # T, Y, X
+                    time_avg = img_np.mean(axis=0) # Y, X
+                    means_c = ndi.mean(time_avg, labels=masks_2d_np, index=cell_ids)
                     for i, cid in enumerate(cell_ids):
-                        raw_means.setdefault(cid, {})[f"raw_ch{c}_mean"] = float(means_c[i])
-            elif img_np.ndim == 3: # T, Y, X
-                time_avg = img_np.mean(axis=0) # Y, X
-                means_c = ndi.mean(time_avg, labels=masks_2d_np, index=cell_ids)
-                for i, cid in enumerate(cell_ids):
-                    raw_means.setdefault(cid, {})["raw_ch0_mean"] = float(means_c[i])
+                        raw_means.setdefault(cid, {})["raw_ch0_mean"] = float(means_c[i])
 
-        # Attach per-cell extracted stats from DataFrame to each cell group
-        if len(fast_cell_summary) > 0:
-            keys = list(crop_root.group_keys())
-            
-            rich_progress = ssqueezepy_cwt_kwargs.get("rich_progress")
-            attach_task = None
-            if ckw.get("show_progress", False):
-                if rich_progress is not None:
-                    attach_task = rich_progress.add_task("[bold green]Attaching CWT metadata...", total=len(keys))
-                    iterable = keys
-                elif RICH_AVAILABLE:
-                    from rich.progress import track
-                    iterable = track(keys, description="[bold green]Attaching CWT metadata...", console=console)
+            # Attach per-cell extracted stats from DataFrame to each cell group
+            if len(fast_cell_summary) > 0:
+                keys = list(crop_root["cells"].group_keys())
+                
+                rich_progress = ssqueezepy_cwt_kwargs.get("rich_progress")
+                attach_task = None
+                if ckw.get("show_progress", False):
+                    if rich_progress is not None:
+                        attach_task = rich_progress.add_task("[bold green]Attaching CWT metadata...", total=len(keys))
+                        iterable = keys
+                    elif RICH_AVAILABLE:
+                        from rich.progress import track
+                        iterable = track(keys, description="[bold green]Attaching CWT metadata...", console=console)
+                    else:
+                        from tqdm.auto import tqdm
+                        iterable = tqdm(keys, desc="Attaching CWT metadata", leave=False)
                 else:
-                    from tqdm.auto import tqdm
-                    iterable = tqdm(keys, desc="Attaching CWT metadata", leave=False)
-            else:
-                iterable = keys
-            
-            for cell_key in iterable:
-                if rich_progress is not None and attach_task is not None:
-                    rich_progress.advance(attach_task)
-                cell_group = crop_root[cell_key]
-                label_id = cell_group.attrs.get("label_id", None)
-                if label_id is not None and label_id in fast_cell_summary:
-                    summary = fast_cell_summary[label_id].copy()
-                        
-                    # Add raw expression means
-                    if label_id in raw_means:
-                        summary.update(raw_means[label_id])
-                        
-                    try:
-                        # Batch update the Zarr attributes in a single disk IO write
-                        cell_group.attrs.update({
-                            f"extracted_{k}": v for k, v in _sanitize_metadata(summary).items()
-                        })
-                    except Exception as e:
-                        logger.warning(f"Could not attach attributes to {cell_key}: {e}")
+                    iterable = keys
+                
+                for cell_key in iterable:
+                    if rich_progress is not None and attach_task is not None:
+                        rich_progress.advance(attach_task)
+                    cell_group = crop_root["cells"][cell_key]
+                    label_id = cell_group.attrs.get("label_id", None)
+                    if label_id is not None and label_id in fast_cell_summary:
+                        summary = fast_cell_summary[label_id].copy()
+                            
+                        # Add raw expression means
+                        if label_id in raw_means:
+                            summary.update(raw_means[label_id])
+                            
+                        try:
+                            # Batch update the Zarr attributes in a single disk IO write
+                            cell_group.attrs.update({
+                                f"extracted_{k}": v for k, v in _sanitize_metadata(summary).items()
+                            })
+                        except Exception as e:
+                            logger.warning(f"Could not attach attributes to {cell_key}: {e}")
 
     # --- Save DataFrame ---
     if dataframe_output_path is not None:
@@ -344,6 +360,13 @@ def process_folder_cwt_cellstreams(images_directory, masks_directory, dataframe_
                 image = load_image(image_path)
                 masks = load_masks(mask_path)
                 
+                img_kwargs = kwargs.copy()
+                if img_kwargs.get("crop_zarrs") and "crop_output_path" not in img_kwargs:
+                    crop_dir = img_kwargs.pop("crop_output_dir", images_directory)
+                    img_kwargs["crop_output_path"] = os.path.join(crop_dir, f"{name}_cwt_crops.zarr")
+                else:
+                    img_kwargs.pop("crop_output_dir", None)
+                    
                 try:
                     pos_data_for_image = process_cwt_image_cellstreams(
                         image,
@@ -351,7 +374,7 @@ def process_folder_cwt_cellstreams(images_directory, masks_directory, dataframe_
                         image_filename=image_filename,
                         masks_filename=masks_filename,
                         min_area=min_area,
-                        **kwargs,
+                        **img_kwargs,
                     )
                     df_part = pos_data_for_image[0] if isinstance(pos_data_for_image, tuple) else pos_data_for_image
                     if not df_part.empty:
@@ -517,9 +540,162 @@ def process_cell(
         
     return processed_any, df_rows
 
-def process_zarr_store(zarr_path: str, force: bool = False, **kwargs):
+def process_zarr_store(zarr_path: str, force: bool = False, process_full_field: bool = False, **kwargs):
     logger.info(f"Opening Zarr store: {zarr_path}")
     store = zarr.open(zarr_path, mode='a')
+    
+    if process_full_field:
+        if "processed" in store:
+            full_field_arr = store["processed"]
+            parent_key = "processed"
+        elif "raw_timeseries" in store:
+            full_field_arr = store["raw_timeseries"]
+            parent_key = "raw_timeseries"
+        else:
+            logger.error("No raw_timeseries or processed found for full field processing.")
+            return False
+            
+        logger.info(f"Processing full-field for {zarr_path}")
+        image_tensor = torch.from_numpy(np.asarray(full_field_arr[:]).astype("float32"))
+        
+        if image_tensor.dim() == 3:
+            image_tensor = image_tensor.unsqueeze(1)
+            
+        if "channel_outputs" not in kwargs:
+            channel_outputs = {0: ["amp", "freq", "phase", "z_score"]}
+            # default to all channels if image has more
+            if image_tensor.shape[1] > 1:
+                for i in range(1, image_tensor.shape[1]):
+                    channel_outputs[i] = ["amp", "phase", "z_score", "phase_difference"]
+            kwargs["channel_outputs"] = channel_outputs
+            
+        use_gpu = kwargs.get("use_gpu", kwargs.get("device", 'cuda' if torch.cuda.is_available() else 'cpu') == 'cuda')
+        kwargs_no_device = {k: v for k, v in kwargs.items() if k not in [
+            "device", "use_gpu", "process_full_field", "crop_zarrs", 
+            "images", "masks", "output", "input", "crop_output_dir", "dataframe_output_path",
+            "min_area", "min_mask_size"
+        ]}
+        
+        import contextlib
+        if RICH_AVAILABLE:
+            progress_ctx = Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                TaskProgressColumn(),
+                TimeElapsedColumn(),
+                TimeRemainingColumn(),
+                console=console
+            )
+        else:
+            progress_ctx = contextlib.nullcontext()
+            
+        with progress_ctx as progress:
+            if RICH_AVAILABLE:
+                kwargs_no_device['rich_progress'] = progress
+            cwt_features = generate_cwt_image_cellstreams(image_tensor, use_gpu=use_gpu, **kwargs_no_device)
+        
+            if RICH_AVAILABLE:
+                write_task = progress.add_task("[bold blue]Writing full-field CWT to Zarr...", total=None)
+                
+            cwt_group = store.require_group("cwt")
+            features_group = cwt_group.require_group(parent_key)
+            
+            if "_attrs" in cwt_features:
+                features_group.attrs.update(cwt_features["_attrs"])
+                
+            for ch_key, ch_features in cwt_features.items():
+                if ch_key in ["raw_timeseries", "timeseries", "_attrs"]:
+                    continue
+                ch_group = features_group.require_group(f"ch_{ch_key}")
+                for feat_name, feat_val in ch_features.items():
+                    feat_val_np = feat_val.detach().cpu().numpy() if hasattr(feat_val, 'detach') else np.asarray(feat_val)
+                    chunks = (1, 1, feat_val_np.shape[-2], feat_val_np.shape[-1]) if feat_val_np.ndim >= 3 else True
+                    if feat_val_np.ndim == 3:
+                        feat_val_np = np.expand_dims(feat_val_np, axis=1) # match CWT axis convention
+                        chunks = (1, 1, feat_val_np.shape[2], feat_val_np.shape[3])
+                    
+                    if feat_name in ch_group:
+                        del ch_group[feat_name]
+                    ch_group.create_dataset(
+                        feat_name, data=feat_val_np, chunks=chunks,
+                        compressor=zarr.Blosc(cname='zstd', clevel=3, shuffle=1)
+                    )
+            
+            if RICH_AVAILABLE:
+                progress.update(write_task, total=1, completed=1, description="[bold green]Wrote full-field CWT to Zarr")
+
+                
+        if kwargs.get("crop_zarrs", False):
+            if "masks" in store:
+                masks = store["masks"][:]
+                from ..spatial.crop import crop_zarr_from_masks
+                
+                features_for_crop = {
+                    f"ch_{k}": v for k, v in cwt_features.items() if k not in ["raw_timeseries", "timeseries", "_attrs"]
+                }
+                if "_attrs" in cwt_features:
+                    features_for_crop["_attrs"] = cwt_features["_attrs"]
+                    
+                crop_dict = {
+                    "cwt": {
+                        parent_key: features_for_crop
+                    }
+                }
+                ckw = kwargs.get("crop_kwargs", {})
+                for k in ["min_mask_size", "padding_fraction", "min_padding_px", "min_area"]:
+                    if k in kwargs:
+                        ckw[k if k != "min_area" else "min_mask_size"] = kwargs[k]
+                
+                crop_zarr_from_masks(
+                    features=crop_dict,
+                    label_image=masks,
+                    output_path=store.require_group("cells"),
+                    **ckw
+                )
+                
+                # --- Fast Metadata Extraction ---
+                try:
+                    from .utils import extract_cwt_cellstreams
+                    masks_tensor = torch.from_numpy(masks) if not isinstance(masks, torch.Tensor) else masks
+                    if hasattr(masks_tensor, 'dim'):
+                        while masks_tensor.dim() > 2:
+                            masks_tensor = masks_tensor.max(dim=0).values if hasattr(masks_tensor.max(dim=0), 'values') else masks_tensor.max(dim=0)[0] if isinstance(masks_tensor.max(dim=0), tuple) else masks_tensor.max(dim=0)
+                    elif hasattr(masks_tensor, 'ndim'):
+                        while masks_tensor.ndim > 2:
+                            masks_tensor = masks_tensor.max(axis=0)
+
+                    fast_cell_summary = {}
+                    for ch_key, features_dict in cwt_features.items():
+                        if ch_key in ["_attrs", "raw_timeseries", "timeseries"]: continue
+                        for feat_key, feat_tensor in features_dict.items():
+                            means, stds = extract_cwt_cellstreams(feat_tensor, masks_tensor)
+                            means_np = means.detach().cpu().numpy()
+                            stds_np = stds.detach().cpu().numpy()
+                            num_cells, num_banks, T_len = means_np.shape
+                            temp_mean = means_np.mean(axis=-1)
+                            temp_std = stds_np.mean(axis=-1)
+                            for c_idx in range(num_cells):
+                                for b_idx in range(num_banks):
+                                    key = f"ch{ch_key}_{feat_key}_bank{b_idx}"
+                                    fast_cell_summary.setdefault(c_idx, {})[f"{key}_mean"] = temp_mean[c_idx, b_idx].item()
+                                    fast_cell_summary[c_idx][f"{key}_std"] = temp_std[c_idx, b_idx].item()
+                                    
+                    cells_group = store.require_group("cells")
+                    from ..io import _sanitize_metadata
+                    for cell_key in cells_group.keys():
+                        cell_group = cells_group[cell_key]
+                        label_id = cell_group.attrs.get("label_id", None)
+                        if label_id is not None and label_id in fast_cell_summary:
+                            cell_group.attrs.update({
+                                f"extracted_{k}": v for k, v in _sanitize_metadata(fast_cell_summary[label_id]).items()
+                            })
+                except Exception as e:
+                    logger.warning(f"Failed to attach fast cell stats: {e}")
+            else:
+                logger.warning("No masks found, cannot crop.")
+                
+        return True
     
     if 'cells' in store:
         cells_group = store['cells']
@@ -572,7 +748,9 @@ def process_zarr_store(zarr_path: str, force: bool = False, **kwargs):
         
         with progress:
             main_task = progress.add_task("[bold green]Processing CWT features...", total=len(cell_ids))
+            sub_task = progress.add_task("[cyan]Computing CWT...", total=100)
             kwargs['rich_progress'] = progress
+            kwargs['rich_sub_task'] = sub_task
             kwargs['image_name'] = image_name
             
             for cell_id in cell_ids:

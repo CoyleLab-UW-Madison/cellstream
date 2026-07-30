@@ -1,6 +1,6 @@
 [project]
 name = "cellstream"
-version = "0.1.1"
+version = "0.1.2"
 description = "Microscopy and single-cell signal processing analysis tools"
 authors = [{ name = "Coyle Lab @ UW-Madison" }]
 readme = "README.md"
@@ -18,7 +18,11 @@ dependencies = [
     "zarr",
     "pyarrow",
     "scipy",
+    "tomli; python_version < '3.11'",
 ]
+
+[project.scripts]
+cellstream = "cellstream.cli:main"
 
 [project.optional-dependencies]
 registration = ["pystackreg"]
@@ -34,4 +38,5 @@ include = ["cellstream*"]
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
+
 

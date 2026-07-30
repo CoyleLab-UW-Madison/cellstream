@@ -1,0 +1,113 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# cellstream MASTER JOB CONFIGURATION REFERENCE
+#
+# Usage: cellstream run examples/example_job_all_options.toml
+#        cellstream run examples/example_job_all_options.toml --dry-run
+#
+# This file demonstrates ALL available job types and settings.
+# Commented-out lines show optional settings with their default values.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Global Defaults (applied to all jobs unless overridden) ──
+[defaults]
+images = "../images"                # Folder containing .tif or .nd2 stacks
+masks  = "../masks"                 # Folder containing segmentation masks
+output = "../results"               # Output directory for dataframes/zarrs
+use_gpu = true                            # GPU acceleration toggle (CUDA/MPS)
+carrier_channel = 1                       # Channel index of primary biological oscillator
+# device = "cuda"                         # Explicit device: "cuda", "cpu", or "mps"
+# downsample_by = 2                       # Spatial downsampling factor (e.g. 2 = 50% scale)
+# min_area = 50                           # Filter out cells smaller than N pixels
+channel_names = ["MinE", "MinD"]          # String labels for image channels
+
+
+
+# ── JOB TYPE 1: CWT (Continuous Wavelet Transform) ──────────
+[[jobs]]
+type = "cwt"
+min_scale = 20                            # Minimum wavelet scale in frames
+max_scale = 180                           # Maximum wavelet scale in frames
+num_filter_banks = 1                      # Number of compressed scale banks
+crop_zarrs = true                         # Generate per-cell Zarr crop stores
+min_mask_size=200
+# ── Optional CWT Settings (commented defaults) ──
+# bank_method = "max_pool"                # Scale compression: "max_pool" or "sort"
+# normalize_histogram = true              # Frame-wise zero-mean, unit-variance normalization
+# mean_center = false                     # Temporal mean centering of input signal
+# normalize_amplitudes = false            # Scale-normalized wavelet power spectrum
+blocks = 'auto'                             # Spatial block slicing count for memory control
+save_full_field = true                   # Save un-cropped full-field CWT features to root Zarr
+save_raw_timeseries = true               # Save raw input image to root Zarr
+save_processed_timeseries = true         # Save pre-processed image to root Zarr
+# dataframe_output_path = "cwt_summary.parquet" # Custom summary dataframe filename
+# crop_output_path = "cell_crops.zarr"     # Custom Zarr crop store path
+
+[jobs.channel_outputs]
+"1" = ["amp", "freq", "phase"]
+"0" = ["amp", "phase_difference"]
+
+# ── JOB TYPE 2: Phase Dynamics & FTLE (Operates on Zarr crops) ──
+[[jobs]]
+type = "phase"
+# Note: When chained after CWT/FFT with crop_zarrs=true, 'input' is automatically
+# passed from the previous step. Specify 'input' explicitly only for standalone runs:
+# input = "D:/data/experiment_01/results/cell_crops.zarr"
+
+ftle_integration_time = 20                # Time window T for Lyapunov exponent advection
+smooth_sigma = 1.0                        # 2D Gaussian spatial smoothing sigma for phase fields
+defect_window_size = 3                    # Window size N for perimeter winding number calculation
+
+# ── Optional Phase Settings ──
+# force_recompute = false                 # Force overwrite existing phase features in Zarr
+# stream_particles = 20000                # Number of active particles in GPU streamline tracer
+# stream_decay = 0.85                     # Streamline trail opacity decay factor per frame
+# stream_inject_rate = 0.05               # Particle injection rate per time frame
+# phase_features_to_process = [           # List of phase feature fields to compute
+#   "winding_number", "velocity", "speed", "wavenumber",
+#   "ftle_forward", "ftle_backward", "streamlines", "phase_streamlines"
+# ]
+
+
+# ── JOB TYPE 3: FFT (Fast Fourier Transform) ────────────────
+[[jobs]]
+type = "fft"
+cutoff_frequency_bin = 3                  # Lower frequency bin cutoff (suppresses DC/drift)
+carrier_index = 1                         # Carrier channel index
+
+# ── Optional FFT Settings ──
+# normalize_histogram = true              # Frame-wise zero-mean unit-variance normalization
+# max_bin = 50                            # Maximum frequency bin to analyze
+# batch_size = "auto"                     # Spatial pixel batch size ('auto' or integer)
+fft_features_to_process = [
+  "full_amplitude", 
+  "normalized_amplitude", 
+  "z_score", 
+  #"phase"
+]
+
+
+# ── JOB TYPE 4: STFT (Short-Time Fourier Transform) ─────────
+#[[jobs]]
+#type = "stft"
+#min_bin = 0                               # Minimum STFT frequency bin
+#max_bin = 100                             # Maximum STFT frequency bin
+#num_filter_banks = 1                      # Number of frequency filter banks
+#n_fft = 256                               # STFT FFT window length (samples)
+
+# ── Optional STFT Settings ──
+# win_length = 128                        # STFT window length
+# mean_center = true                      # Temporal mean centering
+# bank_method = "max_pool"                # Frequency bank reduction method ("max_pool" / "sort")
+
+
+# ── JOB TYPE 5: Pixels (Unsegmented Pixel Profiling) ────────
+#[[jobs]]
+#type = "pixels"
+#c_val = 35.0                              # Threshold multiplier for peak detection
+#min_bin = 4                               # Lower frequency bin bound
+#max_bin = 40                              # Upper frequency bin bound
+#filter_method = "product"                 # Channel filter: "product", "min", "max", or "channel"
+#filter_channel = 0                        # Reference channel for filtering
+#peak_constraint = "exactly_one"           # Peak constraint: "exactly_one", "at_least_one", "none"
+#register_images = true                    # Apply motion registration prior to profiling
+#max_fft_bin = 50                          # Maximum FFT bin limit for profiling

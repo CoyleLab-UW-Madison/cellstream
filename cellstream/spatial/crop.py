@@ -173,7 +173,7 @@ def _crop_and_write_recursive(source_dict, zarr_group, y_slice, x_slice,
 
         # Sub-dict → create sub-group and recurse
         if isinstance(value, dict):
-            sub_group = zarr_group.create_group(str_key, overwrite=True)
+            sub_group = zarr_group.require_group(str_key)
             _crop_and_write_recursive(value, sub_group, y_slice, x_slice,
                                       spatial_shape, compressor)
             continue
@@ -319,17 +319,20 @@ def crop_zarr_from_masks(
     # ------------------------------------------------------------------
     import shutil
     import time
-    if os.path.exists(str(output_path)):
-        for attempt in range(5):
-            try:
-                shutil.rmtree(str(output_path))
-                break
-            except Exception as e:
-                if attempt == 4:
-                    raise RuntimeError(f"Could not delete existing zarr store at {output_path} due to file lock: {e}. Please ensure no other process (like Napari or another IPython console) is holding it open.") from e
-                time.sleep(0.5)
-                
-    root = zarr.open_group(str(output_path), mode="w")
+    if isinstance(output_path, (str, os.PathLike)):
+        if os.path.exists(str(output_path)):
+            for attempt in range(5):
+                try:
+                    shutil.rmtree(str(output_path))
+                    break
+                except Exception as e:
+                    if attempt == 4:
+                        raise RuntimeError(f"Could not delete existing zarr store at {output_path} due to file lock: {e}. Please ensure no other process (like Napari or another IPython console) is holding it open.") from e
+                    time.sleep(0.5)
+                    
+        root = zarr.open_group(str(output_path), mode="w")
+    else:
+        root = output_path
 
     # ------------------------------------------------------------------
     # 5. Write root attrs
@@ -393,8 +396,8 @@ def crop_zarr_from_masks(
         cx = float(xs.mean())
         area = int(cell_mask.sum())
 
-        # 6e. Create cell group
-        cell_group = root.create_group(f"cell_{int(label_id)}", overwrite=True)
+        # 6e. Require cell group (do not overwrite to avoid deleting existing pipelines)
+        cell_group = root.require_group(f"cell_{int(label_id)}")
 
         # 6f. Per-cell attrs
         cell_attrs = {
@@ -407,13 +410,12 @@ def crop_zarr_from_masks(
             "padding_fraction": padding_fraction,
             "min_padding_px": min_padding_px,
         }
-        for k, v in _sanitize_metadata(cell_attrs).items():
-            try:
-                cell_group.attrs[str(k)] = v
-            except Exception as e:
-                logger.warning(
-                    f"Could not save cell {label_id} attribute {k}: {e}"
-                )
+        try:
+            cell_group.attrs.update(_sanitize_metadata(cell_attrs))
+        except Exception as e:
+            logger.warning(
+                f"Could not save cell {label_id} attributes: {e}"
+            )
 
         # 6g. Write cropped mask
         if hasattr(cell_group, "create_array"):

@@ -1,0 +1,59 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# cellstream Chained Pipeline Example: CWT → Phase → FFT
+#
+# Usage:
+#   cellstream run examples/example_job_chain.toml
+#   cellstream run examples/example_job_chain.toml --dry-run
+#
+# Pipeline Flow:
+#   1. Runs CWT on raw image/mask folders → generates cell_crops.zarr
+#   2. Computes phase dynamics (velocity, FTLE, defects) directly on those crops
+#   3. Runs FFT feature extraction on the same crop stores
+# ─────────────────────────────────────────────────────────────────────────────
+
+[defaults]
+images = "../images"
+masks = "../masks"
+output = "../results"
+use_gpu = true
+min_area = 250
+carrier_channel = 1
+channel_names = ["MinE","MinD"]
+
+# ── Step 1: Preprocessing ──
+# Outputs a unified Zarr containing raw_timeseries and preprocessed_timeseries
+[[jobs]]
+type = "preprocess"
+#downsample_by = 0.5
+normalize_histogram = true
+#mean_center = true
+#register = true
+#reg_channel = 0
+
+# ── Step 2: CWT feature extraction on Zarr ──
+[[jobs]]
+type = "cwt"
+min_scale = 20
+max_scale = 180
+num_filter_banks = 1
+process_full_field = true
+crop_zarrs = true
+blocks = 'auto'    
+[jobs.channel_outputs]
+"1" = ["amp", "freq", "phase"]
+"0" = ["amp", "phase_difference"]
+
+# ── Step 3: Phase dynamics on Zarr crops from Step 2 ──
+# Note: Input path is automatically chained from Step 2's Zarr crop output
+[[jobs]]
+type = "phase"
+ftle_integration_time = 20
+smooth_sigma = 1.0
+defect_window_size = 5
+
+# ── Step 4: FFT processing on the same Zarr crops ──
+[[jobs]]
+type = "fft"
+cutoff_frequency_bin = 3
+process_full_field= true
+

@@ -15,8 +15,8 @@ import numpy as np
 # -------------------------------------------------------------------------
 # 1. Load a timeseries image and its label mask
 # -------------------------------------------------------------------------
-image = cellstream.load_image("images/example_timeseries_mini_0.tif")
-masks = cellstream.load_masks("masks/example_timeseries_mini_0_masks.tif")
+image = cellstream.load_image("../images/example_timeseries_mini_0.tif")
+masks = cellstream.load_masks("../masks/example_timeseries_mini_0_masks.tif")
 
 print(f"Image shape: {image.shape}")   # (T=361, C=2, X=250, Y=250)
 print(f"Masks shape: {masks.shape}")   # (X=250, Y=250)

@@ -183,6 +183,7 @@ def generate_fft_features(
     feature_map = {}
     
     rich_progress = kwargs.pop('rich_progress', None)
+    rich_sub_task = kwargs.pop('rich_sub_task', None)
     rich_cell_name = kwargs.pop('rich_cell_name', 'cell')
     disable_tqdm = rich_progress is not None
 
@@ -190,7 +191,11 @@ def generate_fft_features(
         centered_image = centered_image.reshape(T, C, X * Y)
         
         if rich_progress:
-            task = rich_progress.add_task(f"[cyan]Computing FFT for {rich_cell_name}...", total=X * Y)
+            if rich_sub_task is not None:
+                task = rich_sub_task
+                rich_progress.update(task, description=f"[cyan]Computing FFT for {rich_cell_name}...", total=X * Y, completed=0)
+            else:
+                task = rich_progress.add_task(f"[cyan]Computing FFT for {rich_cell_name}...", total=X * Y)
             
         bar = tqdm(total=X * Y, desc="FFT Blocks", leave=False, disable=disable_tqdm)
 
@@ -234,11 +239,16 @@ def generate_fft_features(
         
         bar.close()
         if rich_progress:
-            rich_progress.remove_task(task)
+            if rich_sub_task is None:
+                rich_progress.remove_task(task)
 
     else:
         if rich_progress:
-            task = rich_progress.add_task(f"[cyan]Computing FFT for {rich_cell_name}...", total=None)
+            if rich_sub_task is not None:
+                task = rich_sub_task
+                rich_progress.update(task, description=f"[cyan]Computing FFT for {rich_cell_name}...", total=None, completed=0)
+            else:
+                task = rich_progress.add_task(f"[cyan]Computing FFT for {rich_cell_name}...", total=None)
             
         fft = torch.fft.rfft(centered_image.to(device), axis=0)
         amp = fft.abs()
@@ -259,7 +269,8 @@ def generate_fft_features(
             feature_map["phase"] = phase[:max_bin].cpu()
             
         if rich_progress:
-            rich_progress.remove_task(task)
+            if rich_sub_task is None:
+                rich_progress.remove_task(task)
 
     if return_timeseries:
         feature_map["timeseries"] = preprocessed_timeseries
