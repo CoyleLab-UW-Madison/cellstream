@@ -62,7 +62,7 @@ def query_cwt_block(
 
     # Force environment variable BEFORE import
     os.environ["SSQ_GPU"] = "1" if use_gpu else "0"
-    ssqueezepy_cwt_kwargs.setdefault("show_progress", False)
+    ssqueezepy_cwt_kwargs.pop("show_progress", None)
     from ssqueezepy import cwt
 
     if channel_outputs is None:
@@ -249,7 +249,7 @@ def _infer_blocks(
                     "GPU not available, falling back to default block size of 10."
                 )
                 return 10
-        ssqueezepy_cwt_kwargs.setdefault("show_progress", False)
+        ssqueezepy_cwt_kwargs.pop("show_progress", None)
         _, scales = cwt(dummy_input, **ssqueezepy_cwt_kwargs)
         num_scales = len(scales)
         
@@ -310,6 +310,7 @@ def generate_cwt_image_cellstreams(
     """
     # gpu environment setup for squeezepy
     os.environ["SSQ_GPU"] = "1" if use_gpu else "0"
+    ssqueezepy_cwt_kwargs.pop("show_progress", None)
 
     w_val = ssqueezepy_cwt_kwargs.get("wavelet", None)
     if isinstance(w_val, str) and w_val.strip().startswith("("):

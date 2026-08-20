@@ -317,17 +317,58 @@ def generate_instantaneous_streamlines(
         
     return images
 
+def _get_ftle_chunk_size(H, W, integration_time, device, safety=0.5):
+    """
+    Compute how many output frames can be processed per GPU chunk
+    based on available VRAM.
+
+    Returns float('inf') for CPU (no chunking needed).
+    """
+    if str(device) == 'cpu' or not torch.cuda.is_available():
+        return float('inf')
+
+    torch.cuda.empty_cache()
+    total_mem = torch.cuda.get_device_properties(0).total_memory
+    free_mem = total_mem - torch.cuda.memory_allocated(0)
+    usable = free_mem * safety
+
+    bytes_per_frame = H * W * 4  # float32
+
+    # Fixed GPU cost (independent of chunk size):
+    #   grids:          (4, H, W, 2)       → 4 * H * W * 2 * 4
+    #   v_sampled:      (4, 2, H, W)       → 4 * 2 * H * W * 4   (transient, same footprint)
+    #   Cauchy-Green:   ~10 * (H, W) temps → 10 * H * W * 4
+    #   grid_x, grid_y: (H, W) * 2        → 2 * H * W * 4
+    fixed_cost = (4 * 2 + 4 * 2 + 10 + 2) * bytes_per_frame
+
+    # Per output-frame cost:
+    #   velocity slice: 2 channels per frame → 2 * bytes_per_frame
+    #   ftle slice:     1 per frame          → 1 * bytes_per_frame
+    per_frame_cost = 3 * bytes_per_frame
+
+    # Overlap cost (velocity frames shared between chunks):
+    overlap_cost = integration_time * 2 * bytes_per_frame
+
+    chunk_size = int((usable - fixed_cost - overlap_cost) / per_frame_cost)
+    return max(1, chunk_size)
+
+
 def compute_ftle(
     velocity: torch.Tensor,
     integration_time: int = 20,
     delta: float = 1.0,
     device: str = 'cpu',
     mask: torch.Tensor = None,
-    backward: bool = False
+    backward: bool = False,
+    chunk_size: int | str = 'auto',
+    progress_bar=None,
 ):
     """
     Compute the Finite-Time Lyapunov Exponent field from a velocity tensor.
     
+    Automatically chunks the computation along the time axis when the full
+    velocity tensor would exceed available GPU memory.
+
     Args:
         velocity: (T, 2, Y, X) tensor of velocity
         integration_time: Number of frames to integrate forward (or backward)
@@ -335,17 +376,34 @@ def compute_ftle(
         device: 'cpu' or 'cuda'
         mask: Optional (Y, X) or (T, Y, X) mask
         backward: If True, computes backward FTLE (attracting structures). If False, forward FTLE (repelling).
+        chunk_size: Number of output frames per GPU chunk.
+            'auto' (default) queries available VRAM and picks the largest safe chunk.
+            An explicit int forces that chunk size.
+            If the whole timeseries fits, the fast path is taken with zero overhead.
+        progress_bar: Optional tqdm-compatible progress bar (e.g. tqdm, rich.progress, or
+            napari.utils.progress). If None, a tqdm bar is created automatically.
+            Pass False to disable progress reporting entirely.
         
     Returns:
         ftle: (T, Y, X) tensor of FTLE values, zero-padded for frames where integration isn't possible
     """
-    velocity = velocity.to(device)
     T, _, H, W = velocity.shape
     
     if integration_time >= T:
         raise ValueError(f"integration_time ({integration_time}) must be less than T ({T})")
     
-    ftle = torch.zeros((T, H, W), device=device, dtype=torch.float32)
+    # Determine chunk size
+    if chunk_size == 'auto':
+        chunk_size = _get_ftle_chunk_size(H, W, integration_time, device)
+    
+    # Determine if the full timeseries fits in one chunk (fast path)
+    fits_in_one = (chunk_size >= T)
+    
+    if fits_in_one:
+        velocity_gpu = velocity.to(device)
+    
+    # Output tensor lives on CPU to avoid accumulating VRAM
+    ftle = torch.zeros((T, H, W), dtype=torch.float32)
     
     # Create base grid of all pixel coordinates in [-1, 1] range
     gy = torch.linspace(-1, 1, H, device=device)
@@ -360,69 +418,112 @@ def compute_ftle(
     if backward:
         vel_scale = -vel_scale
     
-    valid_frames = range(integration_time, T) if backward else range(T - integration_time)
+    valid_frames = list(range(integration_time, T) if backward else range(T - integration_time))
+    n_frames = len(valid_frames)
     
-    for t0 in valid_frames:
-        # 4 perturbed grids: +x, -x, +y, -y
-        # Each is (H, W, 2) with last dim = (x, y) for grid_sample
-        px_pos = torch.stack([grid_x + dx_norm, grid_y], dim=-1)  # +x
-        px_neg = torch.stack([grid_x - dx_norm, grid_y], dim=-1)  # -x
-        py_pos = torch.stack([grid_x, grid_y + dy_norm], dim=-1)  # +y
-        py_neg = torch.stack([grid_x, grid_y - dy_norm], dim=-1)  # -y
+    # Progress bar setup — accepts external tqdm/rich/napari progress, or creates one
+    own_bar = False
+    pbar = None
+    if progress_bar is False:
+        pbar = None
+    elif progress_bar is not None:
+        pbar = progress_bar
+    else:
+        direction = "Backward" if backward else "Forward"
+        pbar = tqdm(total=n_frames, desc=f"FTLE ({direction})", leave=False)
+        own_bar = True
+    
+    # Process in chunks
+    for chunk_start in range(0, n_frames, chunk_size):
+        chunk_t0s = valid_frames[chunk_start : chunk_start + chunk_size]
         
-        # Advect all 4 grids forward for integration_time steps
-        grids = torch.stack([px_pos, px_neg, py_pos, py_neg], dim=0)  # (4, H, W, 2)
-        
-        for dt in range(integration_time):
-            t = t0 - dt if backward else t0 + dt
-            v_t = velocity[t:t+1]  # (1, 2, H, W)
+        if not fits_in_one:
+            # Determine the velocity window needed for this chunk
+            if backward:
+                vel_start = min(chunk_t0s) - integration_time
+                vel_end = max(chunk_t0s) + 1
+            else:
+                vel_start = min(chunk_t0s)
+                vel_end = max(chunk_t0s) + integration_time + 1
             
-            # Sample velocity at all 4 grid positions
-            # grid_sample expects (N, H, W, 2)
-            v_sampled = F.grid_sample(v_t.expand(4, -1, -1, -1), grids, 
-                                       mode='bilinear', padding_mode='border', align_corners=True)
-            # v_sampled: (4, 2, H, W)
+            vel_chunk = velocity[vel_start:vel_end].to(device)
+        
+        for t0 in chunk_t0s:
+            # 4 perturbed grids: +x, -x, +y, -y
+            # Each is (H, W, 2) with last dim = (x, y) for grid_sample
+            px_pos = torch.stack([grid_x + dx_norm, grid_y], dim=-1)  # +x
+            px_neg = torch.stack([grid_x - dx_norm, grid_y], dim=-1)  # -x
+            py_pos = torch.stack([grid_x, grid_y + dy_norm], dim=-1)  # +y
+            py_neg = torch.stack([grid_x, grid_y - dy_norm], dim=-1)  # -y
             
-            # Update positions: grids[..., 0] += vx * scale_x, grids[..., 1] += vy * scale_y
-            grids[..., 0] = grids[..., 0] + v_sampled[:, 0] * vel_scale[0]
-            grids[..., 1] = grids[..., 1] + v_sampled[:, 1] * vel_scale[1]
+            # Advect all 4 grids forward for integration_time steps
+            grids = torch.stack([px_pos, px_neg, py_pos, py_neg], dim=0)  # (4, H, W, 2)
             
-            # Clamp to valid range
-            grids = torch.clamp(grids, -1, 1)
+            for dt in range(integration_time):
+                t = t0 - dt if backward else t0 + dt
+                
+                # Index into the correct velocity source
+                if fits_in_one:
+                    v_t = velocity_gpu[t:t+1]  # (1, 2, H, W)
+                else:
+                    v_t = vel_chunk[t - vel_start : t - vel_start + 1]  # (1, 2, H, W)
+                
+                # Sample velocity at all 4 grid positions
+                # grid_sample expects (N, H, W, 2)
+                v_sampled = F.grid_sample(v_t.expand(4, -1, -1, -1), grids, 
+                                           mode='bilinear', padding_mode='border', align_corners=True)
+                # v_sampled: (4, 2, H, W)
+                
+                # Update positions: grids[..., 0] += vx * scale_x, grids[..., 1] += vy * scale_y
+                grids[..., 0] = grids[..., 0] + v_sampled[:, 0] * vel_scale[0]
+                grids[..., 1] = grids[..., 1] + v_sampled[:, 1] * vel_scale[1]
+                
+                # Clamp to valid range
+                grids = torch.clamp(grids, -1, 1)
+            
+            # Compute deformation gradient from final positions
+            # dx/dx0 = (x_plus - x_minus) / (2 * delta)
+            # But we need to convert back from normalized to pixel coords
+            # F_xx = d(final_x)/d(initial_x)
+            F_xx = (grids[0, :, :, 0] - grids[1, :, :, 0]) / (2 * dx_norm)
+            F_xy = (grids[2, :, :, 0] - grids[3, :, :, 0]) / (2 * dy_norm)
+            F_yx = (grids[0, :, :, 1] - grids[1, :, :, 1]) / (2 * dx_norm)
+            F_yy = (grids[2, :, :, 1] - grids[3, :, :, 1]) / (2 * dy_norm)
+            
+            # Cauchy-Green tensor C = F^T F
+            C_xx = F_xx**2 + F_yx**2
+            C_xy = F_xx * F_xy + F_yx * F_yy
+            C_yy = F_xy**2 + F_yy**2
+            
+            # Max eigenvalue of 2x2 symmetric matrix:
+            # lambda_max = (trace + sqrt(trace^2 - 4*det)) / 2
+            trace = C_xx + C_yy
+            det = C_xx * C_yy - C_xy**2
+            discriminant = torch.clamp(trace**2 - 4 * det, min=0)
+            lambda_max = (trace + torch.sqrt(discriminant)) / 2
+            lambda_max = torch.clamp(lambda_max, min=1.0)  # eigenvalue >= 1 (no contraction below identity)
+            
+            # FTLE = (1/T) * ln(sqrt(lambda_max)) = (1/(2T)) * ln(lambda_max)
+            ftle[t0] = (torch.log(lambda_max) / (2.0 * integration_time)).cpu()
+            
+            if pbar is not None:
+                pbar.update(1)
         
-        # Compute deformation gradient from final positions
-        # dx/dx0 = (x_plus - x_minus) / (2 * delta)
-        # But we need to convert back from normalized to pixel coords
-        # F_xx = d(final_x)/d(initial_x)
-        F_xx = (grids[0, :, :, 0] - grids[1, :, :, 0]) / (2 * dx_norm)
-        F_xy = (grids[2, :, :, 0] - grids[3, :, :, 0]) / (2 * dy_norm)
-        F_yx = (grids[0, :, :, 1] - grids[1, :, :, 1]) / (2 * dx_norm)
-        F_yy = (grids[2, :, :, 1] - grids[3, :, :, 1]) / (2 * dy_norm)
-        
-        # Cauchy-Green tensor C = F^T F
-        C_xx = F_xx**2 + F_yx**2
-        C_xy = F_xx * F_xy + F_yx * F_yy
-        C_yy = F_xy**2 + F_yy**2
-        
-        # Max eigenvalue of 2x2 symmetric matrix:
-        # lambda_max = (trace + sqrt(trace^2 - 4*det)) / 2
-        trace = C_xx + C_yy
-        det = C_xx * C_yy - C_xy**2
-        discriminant = torch.clamp(trace**2 - 4 * det, min=0)
-        lambda_max = (trace + torch.sqrt(discriminant)) / 2
-        lambda_max = torch.clamp(lambda_max, min=1.0)  # eigenvalue >= 1 (no contraction below identity)
-        
-        # FTLE = (1/T) * ln(sqrt(lambda_max)) = (1/(2T)) * ln(lambda_max)
-        ftle[t0] = torch.log(lambda_max) / (2.0 * integration_time)
+        # Free chunk memory between chunks
+        if not fits_in_one:
+            del vel_chunk
+            torch.cuda.empty_cache()
+    
+    if own_bar and pbar is not None:
+        pbar.close()
     
     # Apply mask if provided
     if mask is not None:
-        mask = mask.to(device)
         if mask.ndim == 3:
             mask_ftle = mask
         else:
             mask_ftle = mask.unsqueeze(0).expand(T, -1, -1)
-        ftle = ftle * (mask_ftle > 0).float()
+        ftle = ftle * (mask_ftle > 0).float().cpu()
     
     return ftle
 

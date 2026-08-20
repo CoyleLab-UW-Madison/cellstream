@@ -210,13 +210,13 @@ def generate_phase_features(
         if 'ftle_forward' in phase_features_to_process:
             if rich_progress and task:
                 rich_progress.update(task, description=f"[cyan]Computing Forward FTLE for {rich_cell_name}...")
-            ftle_fwd = compute_ftle(v, integration_time=ftle_integration_time, device=device, mask=mask, backward=False)
+            ftle_fwd = compute_ftle(v, integration_time=ftle_integration_time, device=device, mask=mask, backward=False, progress_bar=False if disable_tqdm else None)
             features['ftle_forward'] = ftle_fwd.cpu().numpy()
             
         if 'ftle_backward' in phase_features_to_process:
             if rich_progress and task:
                 rich_progress.update(task, description=f"[cyan]Computing Backward FTLE for {rich_cell_name}...")
-            ftle_bwd = compute_ftle(v, integration_time=ftle_integration_time, device=device, mask=mask, backward=True)
+            ftle_bwd = compute_ftle(v, integration_time=ftle_integration_time, device=device, mask=mask, backward=True, progress_bar=False if disable_tqdm else None)
             features['ftle_backward'] = ftle_bwd.cpu().numpy()
             
         if 'streamlines' in phase_features_to_process:
