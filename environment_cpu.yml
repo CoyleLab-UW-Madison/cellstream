@@ -1,0 +1,35 @@
+﻿name: cellstream-cpu-env
+channels:
+  - pytorch
+  - pyg
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  # PyTorch CPU build & core scientific computing
+  - pytorch
+  - torchvision
+  - cpuonly
+  - numpy<2
+  - pandas
+  - pyarrow
+  - scipy
+  - matplotlib
+  
+  - pytorch-scatter
+  
+  # Image analysis and GUI dependencies
+  - napari
+  - pyqt
+  - rich
+  - tifffile
+  - zarr
+  
+  # Pip for packages not available or reliably maintained in conda channels
+  - pip
+  - pip:
+      - nd2
+      - ssqueezepy  # CWT backend
+      - pystackreg  # Registration backend
+      - git+https://github.com/CoyleLab-UW-Madison/cellstream.git
+      - git+https://github.com/CoyleLab-UW-Madison/napari-cellstream.git

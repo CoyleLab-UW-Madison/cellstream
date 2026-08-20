@@ -18,7 +18,19 @@ Fast image analysis tools for digital signal processing of single-cell data stre
 ## Installation
 
 ### Interactive Exploration
-For interactive data exploration and visualization, we highly recommend using our **[napari-cellstream](https://github.com/CoyleLab-UW-Madison/napari-cellstream)** plugin. The `environment.yml` provided in this repository is specifically geared towards setting up a compatible environment for the napari plugin and its dependencies.
+For interactive data exploration and visualization, we highly recommend using our **[napari-cellstream](https://github.com/CoyleLab-UW-Madison/napari-cellstream)** plugin. Conda environment files are provided for one-step setup:
+
+- **GPU / CUDA systems:**
+  ```bash
+  conda env create -f environment_cuda.yml
+  conda activate cellstream-env
+  ```
+
+- **CPU-only / macOS systems:**
+  ```bash
+  conda env create -f environment_cpu.yml
+  conda activate cellstream-cpu-env
+  ```
 
 ### Headless Batch Processing
 For high-throughput or remote server environments, a `Dockerfile` is provided for running `cellstream` headlessly with full GPU acceleration. 
@@ -35,7 +47,7 @@ pip install git+https://github.com/CoyleLab-UW-Madison/cellstream
 and for the **[napari-cellstream](https://github.com/CoyleLab-UW-Madison/napari-cellstream)** plugin:
 
 ```bash
-pip install git+https://github.com/CoyleLab-UW-Madison/napari-cellstreamream
+pip install git+https://github.com/CoyleLab-UW-Madison/napari-cellstream
 ```
 
 Note this package is still in early stages of development.
